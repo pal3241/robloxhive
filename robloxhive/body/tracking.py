@@ -101,6 +101,12 @@ class PlayerTracker:
         return self._shape
 
     def find(self, label: str) -> Detection | None:
+        requested = label.strip()
+        lowered = requested.lower()
+        allowed = lowered in self.player_labels or lowered.startswith("player:")
+        if not allowed:
+            return None
+
         detections = self.tracker.update()
         players = [d for d in detections if d.label.lower() in self.player_labels]
         if not players:
@@ -111,7 +117,7 @@ class PlayerTracker:
             selected = max(players, key=lambda d: (int(d.metadata.get("track_age", 1)), d.confidence, d.area))
             self._selected_track = selected.track_id
 
-        selected.metadata["requested_player"] = label
+        selected.metadata["requested_player"] = requested.removeprefix("player:").strip()
         selected.metadata["tracking_mode"] = "visual-avatar"
         selected.source = "player_tracker"
         return selected
