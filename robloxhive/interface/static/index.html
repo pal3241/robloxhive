@@ -37,6 +37,7 @@
     <button class="tab" data-tab="agent">Agent</button>
     <button class="tab" data-tab="skills">Skills</button>
     <button class="tab" data-tab="perception">Perception</button>
+    <button class="tab" data-tab="navigation">Navigation</button>
     <button class="tab" data-tab="memory">Memory</button>
   </nav>
 
@@ -167,6 +168,44 @@
     </div>
   </section>
 
+
+  <section id="navigation" class="view">
+    <div class="grid">
+      <div class="card">
+        <div class="row"><div><h2>Navigation Nodes</h2><div class="muted">Local occupancy map, A*, replanning, stuck detection dan recovery.</div></div><button id="refreshNavigation" class="secondary" type="button">Refresh</button></div>
+        <div id="navigationNodes"><p class="muted">Belum ada Body terhubung.</p></div>
+      </div>
+      <form id="navigationProbeForm" class="card">
+        <h2>Navigation Probe</h2>
+        <label>Body</label><select id="navigationAgent"><option value="">Pilih Body...</option></select>
+        <button type="submit">Ambil Navigation State</button>
+        <p id="navigationMessage" class="muted"></p>
+        <div class="meta">Probe tidak menggerakkan karakter; hanya mengambil state planner terakhir dari Windows Body.</div>
+      </form>
+      <div class="card">
+        <h2>Local Map</h2>
+        <pre id="navigationMap">Belum ada map.</pre>
+        <div class="meta">B = bot · G = goal · * = A* path · # = obstacle · . = free · ? = unknown</div>
+      </div>
+      <div class="card">
+        <h2>Navigation Diagnostics</h2>
+        <div id="navigationStats"><p class="muted">Belum ada data.</p></div>
+      </div>
+      <div class="card">
+        <h2>Recent Navigation Probes</h2>
+        <div id="navigationProbes"><p class="muted">Belum ada probe.</p></div>
+      </div>
+      <div class="card">
+        <h2>Recovery Ladder</h2>
+        <div class="item"><b>1. Re-observe</b><div class="meta">Bangun occupancy grid baru dari frame terbaru.</div></div>
+        <div class="item"><b>2. Replan</b><div class="meta">A* mencari jalur lokal baru melalui sel free/unknown.</div></div>
+        <div class="item"><b>3. Motion check</b><div class="meta">Bandingkan frame sebelum/sesudah input.</div></div>
+        <div class="item"><b>4. Unstuck</b><div class="meta">Back/strafe bergantian bila tidak ada displacement visual.</div></div>
+        <div class="item"><b>5. Abort</b><div class="meta">STUCK / PATH_UNREACHABLE dikirim ke Brain untuk retry/replan high-level.</div></div>
+      </div>
+    </div>
+  </section>
+
   <section id="memory" class="view">
     <div class="memory-layout">
       <div class="card"><h2>Game Memory</h2><div id="games"></div></div>
@@ -183,7 +222,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(b.dataset.tab==='navigation'){loadNavigationNodes();loadNavigationProbes()}}));
 async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
 async function loadInstances(){const root=$('#instanceList');root.innerHTML='<p class="muted">Scanning…</p>';try{const items=await api('/api/instances');root.innerHTML=items.length?'':'<p class="muted">Tidak ada Roblox window terdeteksi.</p>';items.forEach(i=>{const div=document.createElement('div');div.className='item';div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN BOT-01</button></div>';div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot','agent-01');root.appendChild(div)})}catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 async function setRole(pid,role,agent_id=null){await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});loadInstances()}
@@ -346,7 +385,67 @@ async function loadPerceptionProbes(){
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 }
 
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}},2000);
+
+async function loadNavigationNodes(){
+  const root=$('#navigationNodes'), select=$('#navigationAgent');
+  try{
+    const nodes=await api('/api/body/nodes');
+    root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Body terhubung.</p>';
+    select.innerHTML='<option value="">Pilih Body...</option>';
+    nodes.forEach(n=>{
+      const nav=n.metadata?.navigation||{};
+      const stats=nav.stats||{};
+      const div=document.createElement('div');div.className='item';
+      div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+(n.online?'online':'offline')+'</span>'+
+        '<div class="meta">Navigation: '+esc(nav.available===false?'OFF':'ON')+' · result '+esc(stats.last_result||'-')+'</div>'+
+        '<div class="meta">Replans '+esc(stats.replans||0)+' · stuck '+esc(stats.stuck_events||0)+' · recoveries '+esc(stats.recoveries||0)+' · motion '+esc(stats.last_motion_score||0)+'</div>';
+      root.appendChild(div);
+      if(n.online){const o=document.createElement('option');o.value=n.agent_id;o.textContent=n.agent_id;select.appendChild(o)}
+    });
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+function renderNavigationResult(result){
+  if(!result){$('#navigationMap').textContent='Belum ada map.';$('#navigationStats').innerHTML='<p class="muted">Belum ada data.</p>';return}
+  const map=(result.map||[]).join('\n');
+  $('#navigationMap').textContent=map||'Map belum terbentuk. Jalankan navigate terlebih dahulu.';
+  const s=result.stats||{};
+  $('#navigationStats').innerHTML=
+    '<div class="item"><b>Result</b><div class="meta">'+esc(result.reason||s.last_result||'-')+'</div></div>'+
+    '<div class="item"><b>Goal cell</b><div class="meta">'+esc(JSON.stringify(result.goal_cell||null))+'</div></div>'+
+    '<div class="item"><b>Path length</b><div class="meta">'+esc((result.path||[]).length)+'</div></div>'+
+    '<div class="item"><b>Replans</b><div class="meta">'+esc(s.replans||0)+'</div></div>'+
+    '<div class="item"><b>Stuck / Recovery</b><div class="meta">'+esc(s.stuck_events||0)+' / '+esc(s.recoveries||0)+'</div></div>'+
+    '<div class="item"><b>Motion score</b><div class="meta">'+esc(s.last_motion_score||0)+'</div></div>';
+}
+$('#refreshNavigation').onclick=()=>{loadNavigationNodes();loadNavigationProbes()};
+$('#navigationProbeForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  $('#navigationMessage').textContent='Mengambil navigation state…';
+  try{
+    const r=await api('/api/body/navigation/probe',{method:'POST',body:JSON.stringify({agent_id:$('#navigationAgent').value})});
+    $('#navigationMessage').textContent='Probe '+r.probe_id+' queued.';
+    loadNavigationProbes();
+  }catch(err){$('#navigationMessage').textContent=err.message}
+});
+async function loadNavigationProbes(){
+  const root=$('#navigationProbes');
+  try{
+    const rows=await api('/api/body/navigation/probes');
+    root.innerHTML=rows.length?'':'<p class="muted">Belum ada probe.</p>';
+    rows.slice(0,10).forEach(p=>{
+      const d=document.createElement('div');d.className='item';
+      const result=p.result||null;
+      d.innerHTML='<b>'+esc(p.agent_id)+'</b> <span class="pill">'+esc(p.status)+'</span><div class="meta">'+esc(p.probe_id)+'</div>'+
+        (result?'<div class="meta">result '+esc(result.reason||result.stats?.last_result||'-')+' · path '+esc((result.path||[]).length)+' · replans '+esc(result.stats?.replans||0)+'</div>':'');
+      d.onclick=()=>renderNavigationResult(result);
+      root.appendChild(d);
+    });
+    const done=rows.find(x=>x.status==='complete'&&x.result);
+    if(done)renderNavigationResult(done.result);
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+
+health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}},2000);
 </script>
 </body>
 </html>
