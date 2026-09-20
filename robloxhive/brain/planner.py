@@ -30,9 +30,9 @@ class KnowledgePlanner:
     @staticmethod
     def _skill_for(text: str) -> str:
         t = text.lower()
-        if any(x in t for x in ("follow ", "ikuti ", "stay with", "keep up with")):
+        if any(x in t for x in ("follow_player", "follow ", "ikuti ", "stay with", "keep up with")):
             return "follow_player"
-        if any(x in t for x in ("kill", "defeat", "fight", "enemy", "boss", "bunuh", "lawan")):
+        if any(x in t for x in ("combat", "kill", "defeat", "fight", "enemy", "boss", "bunuh", "lawan")):
             return "combat"
         if any(x in t for x in ("go to", "travel", "reach", "location", "station", "town", "pergi", "menuju")):
             return "navigate"
@@ -42,7 +42,7 @@ class KnowledgePlanner:
             return "interact"
         if any(x in t for x in ("quest", "mission", "daily", "task")):
             return "quest"
-        if any(x in t for x in ("explore", "find", "discover", "cari", "jelajah")):
+        if any(x in t for x in ("explore", "exploration", "find", "discover", "cari", "jelajah")):
             return "explore"
         return "observe_and_act"
 
