@@ -114,7 +114,12 @@ class HeuristicKnowledgeSynthesizer:
                     result["progression"].append(
                         _entry(text, float(item.get("confidence") or 0.4), [f"C{idx}"])
                     )
-        return normalize_knowledge(result, game_name, self.name)
+        knowledge = normalize_knowledge(result, game_name, self.name)
+        knowledge["source_map"] = {
+            f"S{idx}": str(source.get("url") or "")
+            for idx, source in enumerate(sources, start=1)
+        }
+        return knowledge
 
 
 class OllamaKnowledgeSynthesizer:
@@ -129,7 +134,7 @@ class OllamaKnowledgeSynthesizer:
     def _corpus(bundle: dict[str, Any]) -> tuple[str, dict[str, str]]:
         blocks: list[str] = []
         source_map: dict[str, str] = {}
-        for idx, source in enumerate(bundle.get("sources", [])[:14], start=1):
+        for idx, source in enumerate(bundle.get("sources", [])[:12], start=1):
             sid = f"S{idx}"
             url = str(source.get("url") or "")
             source_map[sid] = url
