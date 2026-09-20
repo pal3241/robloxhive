@@ -24,12 +24,7 @@ class ResearchSource:
 
 
 class InternetResearcher:
-    """Internet research pipeline for learning how a Roblox game works.
-
-    Search and page extraction are intentionally isolated behind this class so a
-    different provider can replace DDGS later without changing the dashboard or
-    memory format.
-    """
+    """Internet research pipeline for learning how a Roblox game works."""
 
     QUERY_TEMPLATES = (
         "{game} Roblox beginner guide tutorial",
@@ -64,6 +59,35 @@ class InternetResearcher:
             return 0.58
         return 0.55
 
+    @staticmethod
+    def _balanced_results(
+        queries: list[str],
+        grouped: dict[str, list[dict[str, str]]],
+        limit: int,
+    ) -> list[tuple[str, dict[str, str]]]:
+        """Round-robin results so beginner, progression, tips and ending all get coverage."""
+        selected: list[tuple[str, dict[str, str]]] = []
+        seen: set[str] = set()
+        index = 0
+        while len(selected) < limit:
+            added = False
+            for query in queries:
+                rows = grouped.get(query, [])
+                if index >= len(rows):
+                    continue
+                result = rows[index]
+                url = (result.get("href") or result.get("url") or "").strip()
+                if url and url not in seen:
+                    seen.add(url)
+                    selected.append((query, result))
+                    added = True
+                    if len(selected) >= limit:
+                        break
+            if not added and all(index >= len(grouped.get(q, [])) for q in queries):
+                break
+            index += 1
+        return selected
+
     def research(
         self,
         game_name: str,
@@ -82,36 +106,28 @@ class InternetResearcher:
 
         queries = self.build_queries(game_name, objective)
         ddgs = DDGS(timeout=self.timeout)
-        search_results: list[tuple[str, dict[str, str]]] = []
+        grouped: dict[str, list[dict[str, str]]] = {}
 
         for index, query in enumerate(queries, start=1):
             if progress:
                 progress("searching", index - 1, len(queries))
             try:
-                results = ddgs.text(
-                    query,
-                    region="wt-wt",
-                    safesearch="moderate",
-                    max_results=max_results_per_query,
-                    backend="auto",
+                grouped[query] = list(
+                    ddgs.text(
+                        query,
+                        region="wt-wt",
+                        safesearch="moderate",
+                        max_results=max_results_per_query,
+                        backend="auto",
+                    )
+                    or []
                 )
             except Exception:
-                results = []
-            for result in results or []:
-                search_results.append((query, result))
+                grouped[query] = []
             if progress:
                 progress("searching", index, len(queries))
 
-        deduped: list[tuple[str, dict[str, str]]] = []
-        seen: set[str] = set()
-        for query, result in search_results:
-            url = (result.get("href") or result.get("url") or "").strip()
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            deduped.append((query, result))
-
-        selected = deduped[:max_pages]
+        selected = self._balanced_results(queries, grouped, max_pages)
         sources: list[ResearchSource] = []
 
         for index, (query, result) in enumerate(selected, start=1):
@@ -128,7 +144,7 @@ class InternetResearcher:
                 content = str(raw)[: self.max_content_chars]
                 extracted = bool(content.strip())
             except Exception:
-                # Search snippets are still useful when a site blocks extraction.
+                # Search snippets remain available if robots/site policy blocks extraction.
                 content = ""
 
             sources.append(
@@ -145,8 +161,6 @@ class InternetResearcher:
             if progress:
                 progress("extracting", index, max(len(selected), 1))
 
-        # Candidate notes are deliberately traceable to a URL. A later LLM
-        # synthesizer may turn this corpus into richer structured knowledge.
         candidates: list[dict[str, Any]] = []
         for source in sources:
             text = source.snippet.strip()
@@ -160,11 +174,17 @@ class InternetResearcher:
                     }
                 )
 
+        coverage = {
+            query: sum(1 for source in sources if source.query == query)
+            for query in queries
+        }
+
         return {
             "game_name": game_name,
             "objective": objective or "learn the game from beginner to completion",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "queries": queries,
+            "coverage": coverage,
             "source_count": len(sources),
             "extracted_count": sum(1 for source in sources if source.extracted),
             "sources": [source.to_dict() for source in sources],
