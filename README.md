@@ -1,5 +1,98 @@
 # RobloxHive
 
+## v0.5.0 — Generic Visual Skills + Skills Dashboard
+
+Four requested Windows Body skills are now implemented:
+
+- `navigate` — locate a visual target, steer toward it, and approach until it is near.
+- `collect` — navigate to an item, interact, then require visual change/disappearance as verification.
+- `interact` — navigate to a target, press the configured interaction key, and require visual change when a target is provided.
+- `follow_player` — track a player template and maintain a configurable visual distance band.
+
+The realtime loop is lightweight and stays on the Windows Body:
+
+```text
+TemplateVision
+   ↓
+Detection (x/y/size/confidence)
+   ↓
+GenericVisualSkills
+   ↓
+Win32MessageInput → assigned Roblox HWND
+   ↓
+capture again
+   ↓
+ActionResult + evidence
+```
+
+This is a **visual baseline**, not the final A*/SLAM pathfinder. It does not yet understand arbitrary 3D geometry or obstacles. The code deliberately verifies actions from perception and fails/retries instead of claiming success blindly.
+
+### Dashboard Skills tab
+
+The dashboard now shows connected Windows Body nodes, their advertised skills, PID/HWND/Game ID metadata, and recent skill results. You can manually test:
+
+```text
+navigate
+collect
+interact
+follow_player
+```
+
+Each test is sent through the same Body command channel used by the autonomous planner.
+
+### Run a Windows Body
+
+Install the Body dependencies:
+
+```powershell
+pip install -e ".[windows]"
+```
+
+List Roblox windows:
+
+```powershell
+python -m robloxhive body --list-windows
+```
+
+When more than one Roblox window exists, RobloxHive intentionally refuses to guess which one is the bot. Start it with the bot PID explicitly:
+
+```powershell
+python -m robloxhive body ^
+  --brain-url http://192.168.1.50:8765 ^
+  --agent-id agent-01 ^
+  --game-id 123456789 ^
+  --pid 24680
+```
+
+The Brain can be running on a phone/another PC. The Windows Body reports its skills back to the dashboard every few seconds.
+
+### Visual templates
+
+The current lightweight detector uses OpenCV template matching:
+
+```text
+data/templates/
+└── <game_id>/
+    ├── shop/
+    │   ├── shop-1.png
+    │   └── shop-2.png
+    ├── fuel/
+    │   └── fuel.png
+    ├── door/
+    │   └── door.png
+    └── Fahri/
+        └── player.png
+```
+
+The dashboard target field uses these labels. Multiple screenshots per label improve robustness across angle/UI changes.
+
+### Important input limitation
+
+The default `Win32MessageInput` sends HWND-scoped Windows messages so it does not intentionally take over the global keyboard/mouse. Some Roblox builds may ignore background `WM_KEY*`/mouse messages because the game can use lower-level input APIs. RobloxHive therefore always relies on visual verification. If the target does not move/change, the skill fails instead of pretending the input worked.
+
+---
+
+
 Modular autonomous Roblox agent architecture with a split **Brain Node** and Windows **Body Node**.
 
 ## v0.4.0 — Knowledge → Goal → Planner → Body → Evidence
