@@ -79,6 +79,18 @@ class GenericSkillTests(unittest.TestCase):
         self.assertEqual(result.status, ActionStatus.SUCCESS)
         self.assertTrue(result.details["evidence"]["verified"])
 
+    def test_interact_requires_visual_verification(self):
+        perception = FakePerception([
+            det(x=420, y=120, w=180, h=180),
+            det(x=420, y=120, w=180, h=180),
+            det(x=420, y=120, w=180, h=180),
+        ])
+        inputs = FakeInput()
+        skills = GenericVisualSkills(perception, inputs, self.config())
+        result = skills.interact({"target": "door"})
+        self.assertEqual(result.status, ActionStatus.FAILED)
+        self.assertEqual(result.error, "INTERACTION_NOT_VERIFIED")
+
     def test_follow_player_maintains_distance(self):
         perception = FakePerception([
             det(x=450, y=180, w=120, h=100),
