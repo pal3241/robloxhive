@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from robloxhive.brain.memory import GameMemory
 from robloxhive.brain.research import InternetResearcher
+from robloxhive.brain.synthesis import AutoKnowledgeSynthesizer
 
 
 @dataclass(slots=True)
@@ -23,6 +24,9 @@ class LearningJob:
     total: int = 1
     error: str | None = None
     research_file: str | None = None
+    knowledge_file: str | None = None
+    synthesizer: str | None = None
+    knowledge_confidence: float = 0.0
     created_at: str = ""
     finished_at: str | None = None
 
@@ -35,10 +39,12 @@ class LearningManager:
         self,
         memory: GameMemory,
         researcher: InternetResearcher | None = None,
+        synthesizer: Any | None = None,
         workers: int = 2,
     ) -> None:
         self.memory = memory
         self.researcher = researcher or InternetResearcher()
+        self.synthesizer = synthesizer or AutoKnowledgeSynthesizer()
         self._jobs: dict[str, LearningJob] = {}
         self._lock = Lock()
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="robloxhive-learn")
@@ -49,6 +55,7 @@ class LearningManager:
             game_id=game_id,
             game_name=game_name.strip(),
             objective=objective.strip() or "learn from beginner to completion and collect tips and tricks",
+            synthesizer=getattr(self.synthesizer, "name", type(self.synthesizer).__name__),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         with self._lock:
@@ -79,13 +86,23 @@ class LearningManager:
                     job_id, stage, completed, total
                 ),
             )
-            path = self.memory.save_research(game_id, game_name, bundle)
+            research_path = self.memory.save_research(game_id, game_name, bundle)
+
+            self._progress(job_id, "synthesizing", 0, 1)
+            knowledge = self.synthesizer.synthesize(game_name, bundle)
+            knowledge_path = self.memory.save_knowledge(game_id, knowledge)
+            self._progress(job_id, "synthesizing", 1, 1)
+
             with self._lock:
                 job = self._jobs[job_id]
                 job.status = "complete"
                 job.stage = "saved"
-                job.completed = job.total
-                job.research_file = str(path)
+                job.completed = 1
+                job.total = 1
+                job.research_file = str(research_path)
+                job.knowledge_file = str(knowledge_path)
+                job.synthesizer = knowledge.get("synthesizer", job.synthesizer)
+                job.knowledge_confidence = float(knowledge.get("confidence", 0.0))
                 job.finished_at = datetime.now(timezone.utc).isoformat()
         except Exception as exc:
             with self._lock:
