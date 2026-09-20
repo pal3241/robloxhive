@@ -28,7 +28,7 @@ class LearnRequest(BaseModel):
 
 
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.2.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="0.3.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     instances = InstanceManager()
@@ -47,7 +47,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                 item.protected = previous.protected
             instances.register(item)
 
-        for pid, previous in known.items():
+        for pid in known:
             if pid not in discovered_pids:
                 instances.mark_dead(pid)
 
@@ -70,7 +70,11 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"ok": True, "version": "0.2.0"}
+        return {
+            "ok": True,
+            "version": "0.3.0",
+            "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
+        }
 
     @app.get("/api/instances")
     def get_instances() -> list[dict]:
@@ -78,7 +82,6 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
 
     @app.post("/api/instances/{pid}/role")
     def set_instance_role(pid: int, request: RoleRequest) -> dict:
-        # Refresh first so PID/HWND identity is based on the current OS state.
         scan_instances()
         match = next((item for item in instances.list() if item.pid == pid and item.alive), None)
         if not match:
@@ -90,7 +93,6 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             elif request.role == "bot":
                 if not request.agent_id:
                     raise HTTPException(status_code=400, detail="agent_id is required for bot")
-                # Explicit reassignment by the dashboard is allowed; automatic reassignment is not.
                 match.protected = False
                 instances.assign_bot(pid, request.agent_id)
             else:
@@ -110,6 +112,13 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.get("/api/games/{game_id}/memory")
     def game_memory(game_id: int) -> dict:
         return memory.load_profile(game_id)
+
+    @app.get("/api/games/{game_id}/knowledge")
+    def game_knowledge(game_id: int) -> dict:
+        knowledge = memory.load_knowledge(game_id)
+        if not knowledge:
+            raise HTTPException(status_code=404, detail="Knowledge has not been synthesized yet")
+        return knowledge
 
     @app.post("/api/learn")
     def start_learning(request: LearnRequest) -> dict:
