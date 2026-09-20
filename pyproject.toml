@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robloxhive"
-version = "0.1.0"
+version = "0.2.0"
 description = "Modular brain/body architecture for an autonomous Roblox agent"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,7 +14,26 @@ dependencies = [
 
 [project.optional-dependencies]
 windows = ["pywin32>=306", "pyrobloxbot", "pydirectinput"]
-brain = ["fastapi>=0.115", "uvicorn>=0.30", "websockets>=13", "aiosqlite>=0.20"]
+brain = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "websockets>=13",
+  "aiosqlite>=0.20",
+  "ddgs>=9.16,<10",
+]
+all = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "websockets>=13",
+  "aiosqlite>=0.20",
+  "ddgs>=9.16,<10",
+  "pywin32>=306",
+  "pyrobloxbot",
+  "pydirectinput",
+]
 
 [tool.setuptools.packages.find]
 include = ["robloxhive*"]
+
+[tool.setuptools.package-data]
+robloxhive = ["interface/static/*.html"]
