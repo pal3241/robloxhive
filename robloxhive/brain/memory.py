@@ -30,6 +30,13 @@ class GameMemory:
                 "latest_queries": [],
                 "sources": [],
             },
+            "knowledge_summary": {
+                "available": False,
+                "synthesizer": None,
+                "confidence": 0.0,
+                "generated_at": None,
+                "section_counts": {},
+            },
             "research_files": [],
             "updated_at": None,
         }
@@ -106,6 +113,50 @@ class GameMemory:
         self.save_profile(game_id, profile)
         return target
 
+    def save_knowledge(self, game_id: int, knowledge: dict[str, Any]) -> Path:
+        directory = self._dir(game_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / "knowledge.json"
+        temp = directory / "knowledge.json.tmp"
+        temp.write_text(json.dumps(knowledge, indent=2, ensure_ascii=False), encoding="utf-8")
+        temp.replace(target)
+
+        sections = (
+            "objectives",
+            "progression",
+            "mechanics",
+            "items",
+            "enemies",
+            "locations",
+            "strategies",
+            "common_mistakes",
+            "endgame",
+            "unknowns",
+            "conflicts",
+        )
+        profile = self.load_profile(game_id)
+        if knowledge.get("game_name"):
+            profile["game_name"] = knowledge["game_name"]
+        profile["knowledge_summary"] = {
+            "available": True,
+            "synthesizer": knowledge.get("synthesizer"),
+            "confidence": knowledge.get("confidence", 0.0),
+            "generated_at": knowledge.get("generated_at"),
+            "section_counts": {
+                section: len(knowledge.get(section, []))
+                for section in sections
+            },
+            "warning": knowledge.get("synthesis_warning"),
+        }
+        self.save_profile(game_id, profile)
+        return target
+
+    def load_knowledge(self, game_id: int) -> dict[str, Any]:
+        path = self._dir(game_id) / "knowledge.json"
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
     def list_games(self) -> list[dict[str, Any]]:
         if not self.root.exists():
             return []
@@ -121,6 +172,7 @@ class GameMemory:
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
             research = profile.get("research", {})
+            knowledge = profile.get("knowledge_summary", {})
             games.append(
                 {
                     "game_id": profile["game_id"],
@@ -130,6 +182,9 @@ class GameMemory:
                     "failures": len(profile.get("failures", [])),
                     "research_sources": research.get("source_count", 0),
                     "last_researched_at": research.get("last_researched_at"),
+                    "knowledge_available": knowledge.get("available", False),
+                    "knowledge_confidence": knowledge.get("confidence", 0.0),
+                    "synthesizer": knowledge.get("synthesizer"),
                     "updated_at": profile.get("updated_at"),
                 }
             )
