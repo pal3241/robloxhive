@@ -10,14 +10,12 @@ SkillHandler = Callable[[dict[str, Any]], ActionResult]
 
 
 class SkillExecutor:
-    """Body-side registry for semantic skills emitted by the Brain planner.
-
-    Game adapters register handlers here. Unknown skills fail safely instead of
-    falling through to arbitrary input.
-    """
+    """Body-side registry for semantic skills emitted by the Brain planner."""
 
     def __init__(self) -> None:
         self._handlers: dict[str, SkillHandler] = {}
+        self.metadata: dict[str, Any] = {}
+        self.perception: Any | None = None
 
     def register(self, name: str, handler: SkillHandler) -> None:
         self._handlers[name] = handler
@@ -45,3 +43,55 @@ class SkillExecutor:
 
     def available(self) -> list[str]:
         return sorted(self._handlers)
+
+    def attach_perception(self, perception: Any, metadata: dict[str, Any] | None = None) -> None:
+        self.perception = perception
+        if metadata:
+            self.metadata.update(metadata)
+
+    def probe(self, label: str) -> dict[str, Any]:
+        if self.perception is None:
+            return {"found": False, "error": "PERCEPTION_NOT_ATTACHED", "label": label}
+        hit = self.perception.find(label)
+        if hit is None:
+            return {
+                "found": False,
+                "label": label,
+                "diagnostics": self._perception_diagnostics(),
+            }
+        return {
+            "found": True,
+            "label": label,
+            "detection": {
+                "label": hit.label,
+                "confidence": hit.confidence,
+                "x": hit.x,
+                "y": hit.y,
+                "width": hit.width,
+                "height": hit.height,
+                "source": hit.source,
+                "track_id": hit.track_id,
+                "metadata": hit.metadata,
+            },
+            "diagnostics": self._perception_diagnostics(),
+        }
+
+    def _perception_diagnostics(self) -> dict[str, Any]:
+        if self.perception is None:
+            return {}
+        fn = getattr(self.perception, "diagnostics", None)
+        if callable(fn):
+            try:
+                return fn()
+            except Exception as exc:
+                return {"error": type(exc).__name__}
+        return {"adapter": type(self.perception).__name__}
+
+    def describe(self) -> dict[str, Any]:
+        return {
+            "skills": self.available(),
+            "metadata": {
+                **self.metadata,
+                "perception": self._perception_diagnostics(),
+            },
+        }
