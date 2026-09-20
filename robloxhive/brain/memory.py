@@ -73,7 +73,7 @@ class GameMemory:
         directory = self._dir(game_id) / "research"
         directory.mkdir(parents=True, exist_ok=True)
 
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         target = directory / f"research-{stamp}.json"
         temp = target.with_suffix(".json.tmp")
         temp.write_text(json.dumps(bundle, indent=2, ensure_ascii=False), encoding="utf-8")
