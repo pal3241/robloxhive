@@ -90,6 +90,7 @@ class KnowledgePlanner:
                         confidence=0.95,
                         success_condition="goal-specific verifier reports success",
                         knowledge_refs=[],
+                        metadata={"target": goal.target} if goal.target else {},
                     )
                 ],
             )
