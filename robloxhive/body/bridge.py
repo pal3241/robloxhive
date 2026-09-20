@@ -47,13 +47,17 @@ class BodyBridge:
         if not force and now - self._last_register < 5.0:
             return True
         try:
+            description = self.executor.describe()
             self._json(
                 "/api/body/register",
                 method="POST",
                 payload={
                     "agent_id": self.agent_id,
-                    "skills": self.executor.available(),
-                    "metadata": self.metadata,
+                    "skills": description["skills"],
+                    "metadata": {
+                        **self.metadata,
+                        **description.get("metadata", {}),
+                    },
                 },
             )
             self._last_register = now
@@ -71,10 +75,24 @@ class BodyBridge:
 
         if not command:
             return None
+        payload = command.get("payload") or {}
+
+        if command.get("type") == "PERCEPTION_PROBE":
+            result = self.executor.probe(str(payload.get("label") or ""))
+            self._json(
+                "/api/body/perception-results",
+                method="POST",
+                payload={
+                    "agent_id": self.agent_id,
+                    "probe_id": payload.get("probe_id"),
+                    "result": result,
+                },
+            )
+            return command
+
         if command.get("type") != "EXECUTE_SKILL":
             return command
 
-        payload = command.get("payload") or {}
         skill = str(payload.get("skill") or "")
         result = self.executor.execute(skill, payload)
         evidence = result.details.get("evidence") if isinstance(result.details, dict) else None
