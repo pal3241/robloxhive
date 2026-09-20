@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
-
-import numpy as np
+from typing import Any, Protocol
 
 
 @dataclass(slots=True)
@@ -30,7 +28,7 @@ class Detection:
 
 
 class FrameSource(Protocol):
-    def capture(self) -> np.ndarray: ...
+    def capture(self) -> Any: ...
 
 
 class PerceptionAdapter(Protocol):
