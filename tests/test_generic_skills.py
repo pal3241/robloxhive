@@ -103,6 +103,16 @@ class GenericSkillTests(unittest.TestCase):
         self.assertEqual(result.status, ActionStatus.SUCCESS)
         self.assertTrue(result.details["evidence"]["follow_distance_stable"])
 
+    def test_target_is_inferred_from_instruction(self):
+        self.assertEqual(
+            GenericVisualSkills._target({"instruction": "Travel to the next station."}),
+            "next station",
+        )
+        self.assertEqual(
+            GenericVisualSkills._target({"instruction": "follow_player Fahri"}),
+            "Fahri",
+        )
+
     def test_registers_four_requested_skills(self):
         skills = GenericVisualSkills(FakePerception([]), FakeInput(), self.config())
         executor = SkillExecutor()
