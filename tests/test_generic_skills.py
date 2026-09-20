@@ -113,6 +113,25 @@ class GenericSkillTests(unittest.TestCase):
             "Fahri",
         )
 
+    def test_approach_delegates_to_navigation_engine(self):
+        class FakeNavigator:
+            def __init__(self):
+                self.calls = []
+            def navigate_to(self, label, near_area_ratio=None, max_iterations=None):
+                self.calls.append((label, near_area_ratio, max_iterations))
+                return True, {"reason": "ARRIVED", "target": label}
+
+        navigator = FakeNavigator()
+        skills = GenericVisualSkills(
+            FakePerception([]),
+            FakeInput(),
+            self.config(),
+            navigator=navigator,
+        )
+        result = skills.navigate({"target": "shop"})
+        self.assertEqual(result.status, ActionStatus.SUCCESS)
+        self.assertEqual(navigator.calls[0][0], "shop")
+
     def test_registers_four_requested_skills(self):
         skills = GenericVisualSkills(FakePerception([]), FakeInput(), self.config())
         executor = SkillExecutor()
