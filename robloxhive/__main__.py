@@ -56,6 +56,9 @@ def _run_body(args: argparse.Namespace) -> None:
         hwnd=instance.hwnd,
         game_id=args.game_id,
         template_root=args.template_root,
+        model_path=args.model,
+        labels_path=args.labels,
+        enable_ocr=not args.no_ocr,
     )
     bridge = BodyBridge(
         brain_url=args.brain_url,
@@ -67,7 +70,6 @@ def _run_body(args: argparse.Namespace) -> None:
             "title": instance.title,
             "game_id": args.game_id,
             "input_backend": "win32-message",
-            "perception": "template-vision",
         },
     )
 
@@ -77,6 +79,7 @@ def _run_body(args: argparse.Namespace) -> None:
     print(f"Game ID : {args.game_id}")
     print(f"Brain   : {args.brain_url}")
     print(f"Skills  : {', '.join(executor.available())}")
+    print(f"Perception: {executor.describe()['metadata'].get('perception', {})}")
     bridge.run_forever()
 
 
@@ -94,6 +97,9 @@ def main() -> None:
     body.add_argument("--game-id", type=int, default=0)
     body.add_argument("--pid", type=int)
     body.add_argument("--template-root", default="data/templates")
+    body.add_argument("--model", help="optional YOLOv8-style ONNX detector path")
+    body.add_argument("--labels", help="optional labels.txt or labels.json path")
+    body.add_argument("--no-ocr", action="store_true", help="disable optional Tesseract OCR")
     body.add_argument("--list-windows", action="store_true")
 
     args = parser.parse_args()
