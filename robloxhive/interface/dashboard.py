@@ -84,8 +84,18 @@ class PerceptionProbeResult(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+class NavigationProbeRequest(BaseModel):
+    agent_id: str = "agent-01"
+
+
+class NavigationProbeResult(BaseModel):
+    agent_id: str
+    probe_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.6.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="0.7.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     runtime = AgentRuntime(memory)
@@ -93,6 +103,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     body_nodes: dict[str, dict[str, Any]] = {}
     manual_tests: dict[str, dict[str, Any]] = {}
     perception_probes: dict[str, dict[str, Any]] = {}
+    navigation_probes: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
 
     def body_snapshot() -> list[dict[str, Any]]:
@@ -144,7 +155,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         online_bodies = sum(1 for body in body_snapshot() if body["online"])
         return {
             "ok": True,
-            "version": "0.6.0",
+            "version": "0.7.0",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
             "active_plan": active.id if active else None,
             "online_bodies": online_bodies,
@@ -349,6 +360,58 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                 finished_at=time.time(),
             )
             return perception_probes[request.probe_id]
+        return {
+            "status": "orphan_result",
+            "agent_id": request.agent_id,
+            "result": request.result,
+        }
+
+    @app.post("/api/body/navigation/probe")
+    def probe_navigation(request: NavigationProbeRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+
+        probe_id = uuid4().hex[:12]
+        navigation_probes[probe_id] = {
+            "probe_id": probe_id,
+            "agent_id": request.agent_id,
+            "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(
+            Command(
+                source="dashboard",
+                type="NAVIGATION_PROBE",
+                payload={
+                    "probe_id": probe_id,
+                    "agent_id": request.agent_id,
+                },
+            )
+        )
+        return navigation_probes[probe_id]
+
+    @app.get("/api/body/navigation/probes")
+    def get_navigation_probes() -> list[dict[str, Any]]:
+        return sorted(
+            navigation_probes.values(),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )[:30]
+
+    @app.post("/api/body/navigation-results")
+    def navigation_result(request: NavigationProbeResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+            node["last_navigation"] = request.result
+        if request.probe_id and request.probe_id in navigation_probes:
+            navigation_probes[request.probe_id].update(
+                status="complete",
+                result=request.result,
+                finished_at=time.time(),
+            )
+            return navigation_probes[request.probe_id]
         return {
             "status": "orphan_result",
             "agent_id": request.agent_id,
