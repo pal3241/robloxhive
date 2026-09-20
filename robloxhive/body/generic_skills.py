@@ -54,10 +54,31 @@ class GenericVisualSkills:
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
-        instruction = str(payload.get("instruction") or "")
+
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            value = metadata.get("target")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        instruction = str(payload.get("instruction") or "").strip()
         quoted = re.findall(r'["\']([^"\']+)["\']', instruction)
         if quoted:
             return quoted[0].strip()
+
+        patterns = (
+            r"(?:follow_player|follow|ikuti)\s+(.+)$",
+            r"(?:go to|travel to|reach|navigate to|pergi ke|menuju)\s+(?:the\s+)?(.+)$",
+            r"(?:collect|loot|pick up|pickup|gather|ambil|kumpulkan)\s+(?:the\s+)?(.+)$",
+            r"(?:interact with|open|use)\s+(?:the\s+)?(.+)$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, instruction, flags=re.IGNORECASE)
+            if not match:
+                continue
+            target = re.sub(r"[.!?]+$", "", match.group(1)).strip()
+            if target:
+                return target
         return None
 
     def _frame_metrics(self, detection: Detection) -> tuple[float, float]:
