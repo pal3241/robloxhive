@@ -1,80 +1,153 @@
 # RobloxHive
 
-Distributed autonomous Roblox agent: **Brain Node** for reasoning/memory and a Windows-only **Body Node** for Roblox control/perception.
+Distributed autonomous Roblox agent: **Brain Node** for reasoning/memory and a Windows-only **Body Node** for Roblox control, perception, and realtime navigation.
 
-## v0.6.0 — Fused Perception
+## v0.7.0 — Local Mapping + A* Navigation
 
-RobloxHive no longer depends only on screenshot templates. The Windows Body now supports an ordered perception stack:
-
-```text
-follow_player target
-        ↓
-PlayerTracker
-        ↓
-ONNX object detector
-        ↓
-OCR / UI text
-        ↓
-Template fallback
-```
-
-For ordinary object targets the player tracker is skipped, so `navigate shop` cannot accidentally lock onto an avatar.
-
-A strong ONNX/OCR hit exits the fusion loop early to reduce CPU cost while Roblox is running.
-
-### Perception sources
-
-**ONNX object detector**
-- YOLOv8-style ONNX output.
-- CPUExecutionProvider by default.
-- Custom game-specific class labels from `labels.json` or `labels.txt`.
-- Used for objects, items, avatars, machines, doors, enemies, etc.
-
-**Player tracker**
-- Lightweight IoU tracking on top of detector results.
-- Stable `track_id` across nearby frames.
-- Activated by `player:<target>`, which is what `follow_player` now requests.
-- The current visual tracker follows a detected avatar; exact username identity still needs nameplate/OCR association when multiple players look similar.
-
-**UI/OCR**
-- Optional Tesseract-backed UI text recognition through `pytesseract`.
-- Useful for buttons, labels, counters and visible nameplates.
-- Automatically disabled if the Tesseract executable is unavailable.
-
-**Template fallback**
-- Existing per-game OpenCV templates remain available.
-- Only used when stronger perception backends fail to identify the target.
-
-## Model layout
-
-By default the Body looks for:
+The `navigate` skill now uses a local navigation engine instead of only steering toward the target image.
 
 ```text
-data/models/<game_id>/
-├── detector.onnx
-├── labels.json
-└── labels.txt
+Target detection
+      ↓
+Bot-window capture
+      ↓
+Local obstacle estimation
+      ↓
+Egocentric occupancy grid
+      ↓
+A*
+      ↓
+Local waypoint / next cell
+      ↓
+Move
+      ↓
+Motion verification
+      ↓
+stuck?
+  ├── no → rebuild map + replan
+  └── yes → recovery → replan
 ```
 
-Only one labels file is necessary.
+The planner remains semantic: the Brain says **navigate to shop**; the Windows Body decides the actual local path.
 
-Example `labels.txt`:
+## Local occupancy grid
+
+The navigator maintains an egocentric grid around the bot.
 
 ```text
-player
-fuel
-shop
-door
-enemy
-train
-station
+? ? ? ? ? ? ? G ? ? ?
+? ? ? ? * * * * ? ? ?
+? ? # # * # # ? ? ? ?
+? ? # * * # ? ? ? ? ?
+? . * * # ? ? ? ? ? ?
+? . * # ? ? ? ? ? ? ?
+? . * . . ? ? ? ? ? ?
+? . B . . ? ? ? ? ? ?
 ```
 
-You can also point to another model manually with `--model` and `--labels`.
+Legend:
 
-## Perception Dashboard
+- `B` — bot
+- `G` — current local goal
+- `*` — A* path
+- `#` — likely obstacle
+- `.` — observed free
+- `?` — unknown
 
-The Dashboard now has:
+Unknown cells are still traversable but have a higher A* cost, so the bot prefers known-free space without becoming unable to explore.
+
+## Obstacle estimation
+
+`ScreenObstacleEstimator` uses the lower portion of the Roblox frame and divides it into local grid cells.
+
+For each cell it measures:
+
+- edge density
+- local texture/variance
+- perspective-adjusted thresholds
+
+Strong nearby structure is marked blocked. Low-edge regions can be marked free.
+
+This is deliberately lightweight for CPU-only operation. It is a local 2D visual estimate, **not yet monocular SLAM or true Roblox geometry**.
+
+## A* pathfinding
+
+`robloxhive/body/navigation/astar.py` performs A* over:
+
+- forward
+- left/right strafe
+- diagonal forward cells
+- limited backwards movement
+
+Costs favor:
+
+1. observed-free cells
+2. short paths
+3. forward movement
+4. unknown cells only when useful
+
+Blocked cells are never entered.
+
+The occupancy map is rebuilt repeatedly while moving, so dynamic changes cause replanning instead of committing to one stale path.
+
+## Motion / stuck detection
+
+Every navigation movement captures:
+
+```text
+frame BEFORE
+   ↓
+movement input
+   ↓
+frame AFTER
+```
+
+The central game view is compared. If the visual change is below the motion threshold, the movement is treated as suspicious/stuck.
+
+Repeated failed displacement triggers the recovery ladder:
+
+```text
+1. stop
+2. back
+3. strafe left
+4. strafe right
+5. longer back/side escape
+6. rebuild map
+7. A* replan
+8. return STUCK / PATH_UNREACHABLE if recovery budget is exhausted
+```
+
+That failure is returned to the Brain rather than looping into a wall forever.
+
+## Skill integration
+
+These skills now use the local navigator when approaching a target:
+
+- `navigate`
+- `collect`
+- `interact`
+
+`follow_player` keeps its faster visual-tracking loop because the target is dynamic and continual.
+
+```text
+collect fuel
+   ↓
+navigator.navigate_to("fuel")
+   ↓
+A* / avoid obstacles
+   ↓
+arrive
+   ↓
+interact
+   ↓
+verify collection
+```
+
+The old visual approach code remains as a fallback when a navigator is not attached, which keeps unit testing and alternate Body implementations simple.
+
+## Navigation Dashboard
+
+Dashboard tabs now include:
 
 ```text
 Overview
@@ -82,49 +155,48 @@ Instances
 Belajar
 Agent
 Skills
-Perception   ← v0.6
+Perception
+Navigation   ← v0.7
 Memory
 ```
 
-The **Perception** tab shows:
+The Navigation tab exposes:
 
-- connected Windows Body
-- active perception adapters
-- ONNX status
-- OCR status
-- model path
-- last perception source
-- frame size
-- live target probe results
+- local occupancy map
+- current A* path
+- local goal cell
+- replan count
+- stuck-event count
+- recovery count
+- last motion score
+- last result
+- Body online/offline state
 
-Example probe:
+You can request a **Navigation Probe** without moving the character. It retrieves the current navigator state from the Windows Body.
 
-```text
-Target: fuel
+## Perception stack
 
-FOUND
-source: onnx
-confidence: 91%
-box: 421,188 103×77
-```
-
-For player tracking:
+Navigation builds on the v0.6 fused perception stack:
 
 ```text
-player:Fahri
+PlayerTracker
+      ↓
+ONNX object detector
+      ↓
+OCR / UI text
+      ↓
+Template fallback
 ```
 
-The returned detection includes a track ID when the player detector/tracker is active.
+Objects/locations are still found by perception; A* determines how to locally move toward them.
 
 ## Windows Body
 
-Install Body dependencies:
+Install:
 
 ```powershell
 pip install -e ".[windows]"
 ```
-
-Tesseract OCR is optional. If it is not installed system-wide, RobloxHive simply reports OCR as unavailable.
 
 Find Roblox windows:
 
@@ -132,7 +204,7 @@ Find Roblox windows:
 python -m robloxhive body --list-windows
 ```
 
-Run the selected bot window:
+Start the explicitly selected bot instance:
 
 ```powershell
 python -m robloxhive body ^
@@ -142,7 +214,7 @@ python -m robloxhive body ^
   --pid 24680
 ```
 
-Explicit model:
+Optional detector:
 
 ```powershell
 python -m robloxhive body ^
@@ -154,83 +226,30 @@ python -m robloxhive body ^
   --labels data\models\123456789\labels.txt
 ```
 
-Disable OCR:
+## Brain stays lightweight
 
-```powershell
-python -m robloxhive body --pid 24680 --game-id 123456789 --no-ocr
-```
-
-## Implemented generic skills
-
-The following skills use the fused perception layer:
-
-- `navigate`
-- `collect`
-- `interact`
-- `follow_player`
+The Brain still does not need OpenCV, NumPy, ONNX Runtime, or Windows APIs.
 
 ```text
-Knowledge
-   ↓
-Goal Manager
-   ↓
-Planner
-   ↓
-semantic skill
-   ↓
-Fused Perception
-   ↓
-HWND-scoped input
-   ↓
-visual verification
-   ↓
-ActionResult
-   ↓
-retry / next step / memory
+Phone / remote Brain
+├── Qwen / Ollama
+├── internet learning
+├── game memory
+├── Goal Manager
+└── high-level Planner
+
+Windows Body
+├── Roblox
+├── fused perception
+├── occupancy mapping
+├── A*
+├── stuck/recovery
+└── HWND-scoped control
 ```
 
-### navigate
+## Per-game learning and memory
 
-Finds the target through fused perception, steers toward its screen center, approaches until its apparent size reaches the configured near threshold, then returns evidence.
-
-### collect
-
-Approaches the target, sends interaction, and requires a visible change/disappearance before it is considered verified.
-
-### interact
-
-Approaches the target and sends the interaction key. A targeted interaction without a measurable visual change is reported as `INTERACTION_NOT_VERIFIED`.
-
-### follow_player
-
-Requests `player:<name>`, uses the player tracking route and maintains an apparent-size distance band.
-
-## Brain on another device
-
-The heavy Brain can stay on Android/another PC/server:
-
-```bash
-pip install -e ".[brain]"
-
-export ROBLOXHIVE_LLM_MODEL="qwen2.5:3b"
-export ROBLOXHIVE_OLLAMA_URL="http://127.0.0.1:11434"
-
-python -m robloxhive dashboard --host 0.0.0.0 --port 8765
-```
-
-ONNX/OpenCV/Tesseract Python packages are **not** part of the Brain dependency set.
-
-## Learning and per-game memory
-
-The **Belajar** tab researches a game from the internet, including:
-
-- beginner tutorials
-- walkthrough/progression
-- tips and strategy
-- items/upgrades
-- win conditions/endgame
-
-Research is synthesized into:
+The **Belajar** tab researches tutorials, progression, tips, items, and completion strategies from the internet, then synthesizes:
 
 ```text
 data/games/<game_id>/
@@ -240,19 +259,31 @@ data/games/<game_id>/
     └── research-<timestamp>.json
 ```
 
-Knowledge retains confidence, source references, and gameplay verification state.
+The Goal Manager and Planner use this knowledge to decide **where and why** to go. The Windows navigator decides **how** to get there locally.
 
-## Window safety
+## Safety / failure behavior
 
-- Bot control is bound to an explicit Roblox PID/HWND.
-- Human/player instances can be marked `PROTECTED`.
-- RobloxHive refuses to guess a bot process when multiple windows exist.
-- No automatic reassignment after a bot process disappears.
-- Perception capture stays scoped to the assigned bot HWND.
+- Human Roblox windows can remain `PROTECTED`.
+- Body control is tied to an explicit PID/HWND.
+- Multiple Roblox windows are never auto-guessed.
+- Capture remains scoped to the bot window.
 - Unknown skills fail closed.
+- Navigation has bounded iterations and bounded recovery.
+- `STUCK`, `TARGET_LOST`, `PATH_UNREACHABLE`, and `NAVIGATION_TIMEOUT` are explicit failures.
+- A navigation action is not declared successful until the visual target is close and centered.
 
-## Current technical boundary
+## Current boundary
 
-The new detector/tracker greatly reduces dependence on templates, but RobloxHive still needs a compatible object-detection model for game-specific visual classes. The repository intentionally does not ship a large pretrained game model.
+v0.7.0 is a **local egocentric A* navigator**, not full persistent world-scale SLAM.
 
-Navigation is still **visual steering**, not full 3D SLAM/A* pathfinding yet. The next navigation layer can build a local obstacle map and waypoints on top of these detections without changing the Goal/Planner/Skill protocol.
+It can:
+
+- detect local likely obstacles
+- generate a local grid
+- route around blocked cells
+- continuously replan
+- verify visual movement
+- recover from stuck states
+- expose the map and path in the dashboard
+
+For very large worlds, the next layer should add a persistent **topological/semantic waypoint graph** (Spawn → Station → Shop → Mine, etc.) above this local navigator. That graph can use A* globally while v0.7 handles obstacle avoidance between nearby waypoints.
