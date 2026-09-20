@@ -281,7 +281,7 @@ class GenericVisualSkills:
         lost = 0
 
         for index in range(max(1, min(max_iterations, 300))):
-            detection = self.perception.find(target)
+            detection = self.perception.find(f"player:{target}")
             if detection is None:
                 lost += 1
                 if lost > cfg.lost_target_limit:
