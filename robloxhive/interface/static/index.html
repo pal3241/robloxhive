@@ -36,6 +36,7 @@
     <button class="tab" data-tab="learn">Belajar</button>
     <button class="tab" data-tab="agent">Agent</button>
     <button class="tab" data-tab="skills">Skills</button>
+    <button class="tab" data-tab="perception">Perception</button>
     <button class="tab" data-tab="memory">Memory</button>
   </nav>
 
@@ -137,6 +138,35 @@
     </div>
   </section>
 
+
+  <section id="perception" class="view">
+    <div class="grid">
+      <div class="card">
+        <div class="row"><div><h2>Perception Nodes</h2><div class="muted">Backend visual yang aktif di masing-masing Windows Body.</div></div><button id="refreshPerception" class="secondary" type="button">Refresh</button></div>
+        <div id="perceptionNodes"><p class="muted">Belum ada Body terhubung.</p></div>
+      </div>
+      <form id="perceptionForm" class="card">
+        <h2>Probe Target</h2>
+        <label>Body</label><select id="perceptionAgent"><option value="">Pilih Body...</option></select>
+        <label>Label / target</label><input id="perceptionLabel" placeholder="shop / fuel / player:Fahri / PLAY" required>
+        <button type="submit">Probe Perception</button>
+        <p id="perceptionMessage" class="muted"></p>
+        <div class="meta">Urutan fusion: player tracker → ONNX object detector → OCR UI → template fallback.</div>
+      </form>
+      <div class="card">
+        <h2>Recent Probes</h2>
+        <div id="perceptionProbes"><p class="muted">Belum ada probe.</p></div>
+      </div>
+      <div class="card">
+        <h2>Target Sources</h2>
+        <div class="item"><b>player_tracker</b><div class="meta">Tracking avatar berbasis detection + IoU track ID.</div></div>
+        <div class="item"><b>onnx</b><div class="meta">YOLOv8-style ONNX detector untuk objek/game classes.</div></div>
+        <div class="item"><b>ocr</b><div class="meta">UI text/nameplate detection jika Tesseract tersedia.</div></div>
+        <div class="item"><b>template</b><div class="meta">Fallback terakhir untuk game/objek yang belum punya model.</div></div>
+      </div>
+    </div>
+  </section>
+
   <section id="memory" class="view">
     <div class="memory-layout">
       <div class="card"><h2>Game Memory</h2><div id="games"></div></div>
@@ -153,7 +183,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}}));
 async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
 async function loadInstances(){const root=$('#instanceList');root.innerHTML='<p class="muted">Scanning…</p>';try{const items=await api('/api/instances');root.innerHTML=items.length?'':'<p class="muted">Tidak ada Roblox window terdeteksi.</p>';items.forEach(i=>{const div=document.createElement('div');div.className='item';div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN BOT-01</button></div>';div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot','agent-01');root.appendChild(div)})}catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 async function setRole(pid,role,agent_id=null){await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});loadInstances()}
@@ -267,7 +297,56 @@ async function loadSkillTests(){
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 }
 
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}},2000);
+
+async function loadPerceptionNodes(){
+  const root=$('#perceptionNodes'), select=$('#perceptionAgent');
+  try{
+    const nodes=await api('/api/body/nodes');
+    root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Body terhubung.</p>';
+    select.innerHTML='<option value="">Pilih Body...</option>';
+    nodes.forEach(n=>{
+      const p=n.metadata?.perception||{};
+      const div=document.createElement('div');div.className='item';
+      div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+(n.online?'online':'offline')+'</span>'+
+        '<div class="meta">Adapters: '+esc((p.adapters||[]).join(' → ')||'-')+'</div>'+
+        '<div class="meta">ONNX: '+esc(n.metadata?.onnx_enabled?'ON':'OFF')+' · OCR: '+esc(n.metadata?.ocr_available?'ON':'OFF')+' · template: '+esc(n.metadata?.template_fallback?'ON':'OFF')+'</div>'+
+        '<div class="meta">Model: '+esc(n.metadata?.model_path||'-')+'</div>'+
+        '<div class="meta">Last source: '+esc(p.last_source||'-')+' · frame '+esc((p.frame_size||[]).join('×')||'-')+'</div>';
+      root.appendChild(div);
+      if(n.online){const o=document.createElement('option');o.value=n.agent_id;o.textContent=n.agent_id;select.appendChild(o)}
+    });
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+$('#refreshPerception').onclick=()=>{loadPerceptionNodes();loadPerceptionProbes()};
+$('#perceptionForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  $('#perceptionMessage').textContent='Mengirim probe ke Body…';
+  try{
+    const r=await api('/api/body/perception/probe',{method:'POST',body:JSON.stringify({agent_id:$('#perceptionAgent').value,label:$('#perceptionLabel').value.trim()})});
+    $('#perceptionMessage').textContent='Probe '+r.probe_id+' queued.';
+    loadPerceptionProbes();
+  }catch(err){$('#perceptionMessage').textContent=err.message}
+});
+async function loadPerceptionProbes(){
+  const root=$('#perceptionProbes');
+  try{
+    const rows=await api('/api/body/perception/probes');
+    root.innerHTML=rows.length?'':'<p class="muted">Belum ada probe.</p>';
+    rows.slice(0,12).forEach(p=>{
+      const d=document.createElement('div');d.className='item';
+      const found=p.result?.found;
+      const det=p.result?.detection;
+      const status=p.status==='complete'?(found?'FOUND':'NOT FOUND'):p.status;
+      d.innerHTML='<b>'+esc(p.label)+'</b> <span class="pill '+(found?'ok':'')+'">'+esc(status)+'</span>'+
+        '<div class="meta">'+esc(p.agent_id)+' · '+esc(p.probe_id)+'</div>'+
+        (det?'<div class="meta">source '+esc(det.source)+' · confidence '+Math.round((det.confidence||0)*100)+'% · box '+Math.round(det.x)+','+Math.round(det.y)+' '+Math.round(det.width)+'×'+Math.round(det.height)+(det.track_id?' · track #'+det.track_id:'')+'</div>':'')+
+        (p.result?.diagnostics?'<pre>'+esc(JSON.stringify(p.result.diagnostics,null,2))+'</pre>':'');
+      root.appendChild(d);
+    });
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+
+health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}},2000);
 </script>
 </body>
 </html>
