@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robloxhive"
-version = "0.5.0"
+version = "0.6.0"
 description = "Modular brain/body architecture for an autonomous Roblox agent"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,6 +19,8 @@ windows = [
   "pydirectinput",
   "numpy>=1.26",
   "opencv-python>=4.10",
+  "onnxruntime>=1.19",
+  "pytesseract>=0.3.13",
 ]
 brain = [
   "fastapi>=0.115",
@@ -38,6 +40,8 @@ all = [
   "pydirectinput",
   "numpy>=1.26",
   "opencv-python>=4.10",
+  "onnxruntime>=1.19",
+  "pytesseract>=0.3.13",
 ]
 
 [tool.setuptools.packages.find]
