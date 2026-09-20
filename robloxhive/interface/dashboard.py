@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -11,6 +11,8 @@ from robloxhive.body.discovery import discover_roblox_windows
 from robloxhive.body.instances import InstanceManager, ProtectedInstanceError
 from robloxhive.brain.learning import LearningManager
 from robloxhive.brain.memory import GameMemory
+from robloxhive.brain.runtime import AgentRuntime
+from robloxhive.shared.models import ActionResult, Goal
 
 
 class RoleRequest(BaseModel):
@@ -27,10 +29,27 @@ class LearnRequest(BaseModel):
     )
 
 
+class GoalRequest(BaseModel):
+    game_id: int = Field(gt=0)
+    type: str = Field(default="autonomous_progress", min_length=1, max_length=80)
+    target: str | None = Field(default=None, max_length=160)
+    instruction: str = Field(min_length=1, max_length=600)
+    priority: int = Field(default=70, ge=0, le=100)
+    persistent: bool = True
+
+
+class BodyResultRequest(BaseModel):
+    plan_id: str
+    step_index: int = Field(ge=0)
+    result: ActionResult
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.3.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="0.4.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
+    runtime = AgentRuntime(memory)
     instances = InstanceManager()
     static_index = Path(__file__).parent / "static" / "index.html"
 
@@ -70,10 +89,12 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict:
+        active = runtime.get_plan()
         return {
             "ok": True,
-            "version": "0.3.0",
+            "version": "0.4.0",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
+            "active_plan": active.id if active else None,
         }
 
     @app.get("/api/instances")
@@ -135,5 +156,61 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         if not job:
             raise HTTPException(status_code=404, detail="Learning job not found")
         return job.to_dict()
+
+    @app.post("/api/agent/goals")
+    def start_goal(request: GoalRequest) -> dict:
+        knowledge = memory.load_knowledge(request.game_id)
+        if not knowledge:
+            raise HTTPException(
+                status_code=409,
+                detail="Game knowledge is empty. Learn/synthesize this game first.",
+            )
+        goal = Goal(
+            type=request.type,
+            target=request.target,
+            priority=request.priority,
+            persistent=request.persistent,
+            metadata={"instruction": request.instruction},
+        )
+        plan = runtime.start_goal(request.game_id, goal)
+        return plan.model_dump(mode="json")
+
+    @app.get("/api/agent/active-plan")
+    def active_plan() -> dict | None:
+        plan = runtime.get_plan()
+        return plan.model_dump(mode="json") if plan else None
+
+    @app.get("/api/agent/plans/{plan_id}")
+    def get_plan(plan_id: str) -> dict:
+        plan = runtime.get_plan(plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail="Plan not found")
+        return plan.model_dump(mode="json")
+
+    @app.get("/api/body/commands/next")
+    def next_body_command(agent_id: str = "agent-01", timeout: float = 0.0) -> dict | None:
+        # agent_id is reserved for routing when multi-agent support arrives.
+        _ = agent_id
+        command = runtime.next_command(timeout=max(0.0, min(timeout, 5.0)))
+        if command is None:
+            return None
+        return {
+            "source": command.source,
+            "type": command.type,
+            "payload": command.payload,
+        }
+
+    @app.post("/api/body/results")
+    def body_result(request: BodyResultRequest) -> dict:
+        try:
+            plan = runtime.record_result(
+                request.plan_id,
+                request.step_index,
+                request.result,
+                request.evidence,
+            )
+        except (KeyError, IndexError, ValueError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return plan.model_dump(mode="json")
 
     return app
