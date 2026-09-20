@@ -5,6 +5,7 @@ from pathlib import Path
 from robloxhive.body.capture import Win32WindowCapture
 from robloxhive.body.generic_skills import GenericVisualSkills, SkillConfig
 from robloxhive.body.input_win32 import Win32MessageInput
+from robloxhive.body.navigation.navigator import LocalNavigator
 from robloxhive.body.perception import TemplateVision
 from robloxhive.body.perception_fusion import CompositePerception
 from robloxhive.body.skills import SkillExecutor
@@ -69,9 +70,11 @@ def create_generic_skill_executor(
 
     perception = CompositePerception(adapters)
     input_backend = Win32MessageInput(hwnd)
-    skills = GenericVisualSkills(perception, input_backend, config)
+    navigator = LocalNavigator(capture, perception, input_backend)
+    skills = GenericVisualSkills(perception, input_backend, config, navigator=navigator)
 
     executor = SkillExecutor()
     skills.register_into(executor)
     executor.attach_perception(perception, metadata)
+    executor.attach_navigation(navigator)
     return executor
