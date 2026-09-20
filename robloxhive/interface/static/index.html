@@ -34,6 +34,7 @@
     <button class="tab active" data-tab="overview">Overview</button>
     <button class="tab" data-tab="instances">Instances</button>
     <button class="tab" data-tab="learn">Belajar</button>
+    <button class="tab" data-tab="agent">Agent</button>
     <button class="tab" data-tab="memory">Memory</button>
   </nav>
 
@@ -67,6 +68,35 @@
     </div>
   </section>
 
+
+  <section id="agent" class="view">
+    <div class="grid">
+      <form id="goalForm" class="card">
+        <h2>Agent Goal</h2>
+        <p class="muted">Goal memakai knowledge game yang sudah dipelajari, lalu Planner membuat semantic skill plan untuk Windows Body.</p>
+        <label>Game</label><select id="goalGame" required><option value="">Pilih game...</option></select>
+        <label>Goal type</label>
+        <select id="goalType">
+          <option value="autonomous_progress">Autonomous Progress</option>
+          <option value="complete_game">Complete Game</option>
+          <option value="quest">Quest / Daily</option>
+          <option value="follow_player">Follow Player</option>
+          <option value="combat">Combat</option>
+          <option value="explore">Explore</option>
+        </select>
+        <label>Target (optional)</label><input id="goalTarget" placeholder="Player / enemy / quest / location">
+        <label>Instruction</label><textarea id="goalInstruction">Gunakan knowledge game untuk progress sebaik mungkin dan verifikasi setiap langkah dari gameplay.</textarea>
+        <label>Priority</label><input id="goalPriority" type="number" min="0" max="100" value="70">
+        <button type="submit">Start Goal</button>
+        <p id="goalMessage" class="muted"></p>
+      </form>
+      <div class="card">
+        <div class="row"><div><h2>Active Plan</h2><div class="muted">Knowledge → Planner → Skill → Body → Evidence → Memory</div></div><button id="refreshPlan" class="secondary" type="button">Refresh</button></div>
+        <div id="activePlan"><p class="muted">Belum ada plan aktif.</p></div>
+      </div>
+    </div>
+  </section>
+
   <section id="memory" class="view">
     <div class="memory-layout">
       <div class="card"><h2>Game Memory</h2><div id="games"></div></div>
@@ -83,7 +113,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs()}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}}));
 async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
 async function loadInstances(){const root=$('#instanceList');root.innerHTML='<p class="muted">Scanning…</p>';try{const items=await api('/api/instances');root.innerHTML=items.length?'':'<p class="muted">Tidak ada Roblox window terdeteksi.</p>';items.forEach(i=>{const div=document.createElement('div');div.className='item';div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN BOT-01</button></div>';div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot','agent-01');root.appendChild(div)})}catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 async function setRole(pid,role,agent_id=null){await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});loadInstances()}
@@ -94,7 +124,59 @@ const labels={objectives:'Objectives',progression:'Progression',mechanics:'Mecha
 function renderKnowledge(k){const root=$('#knowledgeDetail');root.innerHTML='';if(!k||!Object.keys(k).length){root.innerHTML='<p class="muted">Knowledge belum tersedia.</p>';return}if(k.overview){const p=document.createElement('p');p.className='summary';p.textContent=k.overview;root.appendChild(p)}Object.entries(labels).forEach(([key,label])=>{const rows=k[key]||[];if(!rows.length)return;const sec=document.createElement('section');sec.className='knowledge-section';const h=document.createElement('h3');h.textContent=label+' ('+rows.length+')';sec.appendChild(h);rows.forEach(row=>{const d=document.createElement('div');d.className='knowledge-entry';const text=document.createElement('div');text.textContent=row.text||'';const meta=document.createElement('small');meta.textContent='confidence '+Math.round((row.confidence||0)*100)+'% · '+((row.verified_in_game)?'verified in-game':'belum diverifikasi')+' · sources '+((row.sources||[]).join(', ')||'-');d.append(text,meta);sec.appendChild(d)});root.appendChild(sec)})}
 async function selectGame(g){$('#memoryTitle').textContent=(g.game_name||'Game '+g.game_id)+' · '+g.game_id;$('#memorySummary').textContent='Loading…';$('#knowledgeDetail').innerHTML='';try{const profile=await api('/api/games/'+g.game_id+'/memory');$('#memoryRaw').textContent=JSON.stringify(profile,null,2);let knowledge={};try{knowledge=await api('/api/games/'+g.game_id+'/knowledge')}catch{}const ks=profile.knowledge_summary||{};$('#memorySummary').textContent='Sources: '+(profile.research?.source_count||0)+' · Synthesizer: '+(ks.synthesizer||'-')+' · Confidence: '+Math.round((ks.confidence||0)*100)+'%';renderKnowledge(knowledge)}catch(e){$('#memorySummary').textContent=e.message}}
 async function loadGames(){try{const games=await api('/api/games');$('#games').innerHTML=games.length?'':'<p class="muted">Belum ada memory game.</p>';games.forEach(g=>{const b=document.createElement('button');b.className='secondary game-btn';b.innerHTML='<b>'+esc(g.game_name||'Game '+g.game_id)+'</b><div class="meta">ID '+g.game_id+' · '+g.research_sources+' sources · knowledge '+(g.knowledge_available?'ready':'pending')+(g.knowledge_available?' · '+Math.round((g.knowledge_confidence||0)*100)+'%':'')+'</div>';b.onclick=()=>selectGame(g);$('#games').appendChild(b)})}catch(e){$('#games').innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs()},2000);
+
+async function loadAgentGames(){
+  const select=$('#goalGame');
+  const current=select.value;
+  try{
+    const games=await api('/api/games');
+    select.innerHTML='<option value="">Pilih game...</option>';
+    games.filter(g=>g.knowledge_available).forEach(g=>{
+      const o=document.createElement('option');
+      o.value=String(g.game_id);
+      o.textContent=(g.game_name||('Game '+g.game_id))+' · '+g.game_id;
+      select.appendChild(o);
+    });
+    if([...select.options].some(o=>o.value===current))select.value=current;
+  }catch(e){$('#goalMessage').textContent=e.message}
+}
+function renderPlan(plan){
+  const root=$('#activePlan');
+  if(!plan){root.innerHTML='<p class="muted">Belum ada plan aktif.</p>';return}
+  root.innerHTML='';
+  const head=document.createElement('div');
+  head.className='item';
+  head.innerHTML='<b>'+esc(plan.goal?.type||'goal')+'</b> <span class="pill">'+esc(plan.status)+'</span><div class="meta">Plan '+esc(plan.id)+' · Game '+esc(plan.game_id)+' · step '+Math.min((plan.current_step_index||0)+1,plan.steps?.length||0)+'/'+(plan.steps?.length||0)+'</div>';
+  root.appendChild(head);
+  (plan.steps||[]).forEach(step=>{
+    const d=document.createElement('div');
+    d.className='knowledge-entry';
+    const mark=step.status==='complete'?'✓':step.status==='running'?'▶':step.status==='failed'?'✕':'○';
+    d.innerHTML='<div><b>'+mark+' '+esc(step.skill)+'</b> <span class="pill">'+esc(step.status)+'</span></div><div>'+esc(step.instruction)+'</div><small>confidence '+Math.round((step.confidence||0)*100)+'% · attempts '+(step.attempts||0)+'/'+(step.max_attempts||0)+' · '+esc(step.success_condition||'')+'</small>';
+    root.appendChild(d);
+  });
+}
+async function loadActivePlan(){try{renderPlan(await api('/api/agent/active-plan'))}catch(e){$('#activePlan').innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
+$('#goalForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  $('#goalMessage').textContent='Membuat plan dari game knowledge…';
+  try{
+    const body={
+      game_id:Number($('#goalGame').value),
+      type:$('#goalType').value,
+      target:$('#goalTarget').value.trim()||null,
+      instruction:$('#goalInstruction').value,
+      priority:Number($('#goalPriority').value),
+      persistent:true
+    };
+    const plan=await api('/api/agent/goals',{method:'POST',body:JSON.stringify(body)});
+    $('#goalMessage').textContent='Plan '+plan.id+' dibuat dan step pertama dikirim ke Body command queue.';
+    renderPlan(plan);
+  }catch(err){$('#goalMessage').textContent=err.message}
+});
+$('#refreshPlan').onclick=loadActivePlan;
+
+health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan()},2000);
 </script>
 </body>
 </html>
