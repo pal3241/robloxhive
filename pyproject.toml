@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robloxhive"
-version = "0.4.0"
+version = "0.5.0"
 description = "Modular brain/body architecture for an autonomous Roblox agent"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,7 +13,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-windows = ["pywin32>=306", "pyrobloxbot", "pydirectinput"]
+windows = [
+  "pywin32>=306",
+  "pyrobloxbot",
+  "pydirectinput",
+  "numpy>=1.26",
+  "opencv-python>=4.10",
+]
 brain = [
   "fastapi>=0.115",
   "uvicorn>=0.30",
@@ -30,6 +36,8 @@ all = [
   "pywin32>=306",
   "pyrobloxbot",
   "pydirectinput",
+  "numpy>=1.26",
+  "opencv-python>=4.10",
 ]
 
 [tool.setuptools.packages.find]
