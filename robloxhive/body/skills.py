@@ -16,6 +16,7 @@ class SkillExecutor:
         self._handlers: dict[str, SkillHandler] = {}
         self.metadata: dict[str, Any] = {}
         self.perception: Any | None = None
+        self.navigation: Any | None = None
 
     def register(self, name: str, handler: SkillHandler) -> None:
         self._handlers[name] = handler
@@ -48,6 +49,17 @@ class SkillExecutor:
         self.perception = perception
         if metadata:
             self.metadata.update(metadata)
+
+    def attach_navigation(self, navigation: Any) -> None:
+        self.navigation = navigation
+
+    def navigation_probe(self) -> dict[str, Any]:
+        if self.navigation is None:
+            return {"available": False, "error": "NAVIGATION_NOT_ATTACHED"}
+        diagnostics = getattr(self.navigation, "diagnostics", None)
+        if not callable(diagnostics):
+            return {"available": True, "adapter": type(self.navigation).__name__}
+        return {"available": True, **diagnostics()}
 
     def probe(self, label: str) -> dict[str, Any]:
         if self.perception is None:
@@ -93,5 +105,6 @@ class SkillExecutor:
             "metadata": {
                 **self.metadata,
                 "perception": self._perception_diagnostics(),
+                "navigation": self.navigation_probe(),
             },
         }
