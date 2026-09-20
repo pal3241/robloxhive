@@ -90,7 +90,7 @@ class AgentRuntime:
             if result.status == ActionStatus.SUCCESS:
                 step.status = StepStatus.COMPLETE
                 self._record_experience(plan, step, True)
-                self._verify_referenced_knowledge(plan.game_id, step, True, evidence)
+                self._apply_gameplay_verification(plan.game_id, step, evidence)
                 plan.current_step_index += 1
                 if plan.current_step_index >= len(plan.steps):
                     plan.status = PlanStatus.COMPLETE
@@ -103,7 +103,7 @@ class AgentRuntime:
                 step.status = StepStatus.FAILED
                 plan.status = PlanStatus.BLOCKED
                 self._record_experience(plan, step, False)
-                self._verify_referenced_knowledge(plan.game_id, step, False, evidence)
+                self._apply_gameplay_verification(plan.game_id, step, evidence)
                 return plan
 
         self._dispatch_current(plan)
@@ -125,31 +125,39 @@ class AgentRuntime:
             },
         )
 
-    def _verify_referenced_knowledge(
+    def _apply_gameplay_verification(
         self,
         game_id: int,
         step: Any,
-        success: bool,
         evidence: dict[str, Any] | None,
     ) -> None:
-        # Source IDs alone are not enough to identify one knowledge row safely.
-        # We therefore update entries by exact instruction text, preserving source traceability.
+        """Update learned knowledge only when evidence explicitly verifies/contradicts it.
+
+        Action success alone is not proof that an internet claim is true.
+        """
+        evidence = evidence or {}
+        verified = evidence.get("verified") is True
+        contradicted = evidence.get("contradicts") is True
+        if not verified and not contradicted:
+            return
+
         knowledge = self.memory.load_knowledge(game_id)
         changed = False
-        for section, rows in knowledge.items():
+        for _section, rows in knowledge.items():
             if not isinstance(rows, list):
                 continue
             for item in rows:
                 if not isinstance(item, dict) or item.get("text") != step.instruction:
                     continue
-                item["last_gameplay_evidence"] = evidence or {}
+                item["last_gameplay_evidence"] = evidence
                 item["verification_attempts"] = int(item.get("verification_attempts", 0)) + 1
-                if success:
+                if verified:
                     item["verified_in_game"] = True
                     item["confidence"] = min(1.0, max(float(item.get("confidence", 0.0)), 0.9))
-                else:
+                if contradicted:
+                    item["verified_in_game"] = False
                     item["verification_failures"] = int(item.get("verification_failures", 0)) + 1
-                    item["confidence"] = max(0.05, float(item.get("confidence", 0.0)) * 0.75)
+                    item["confidence"] = max(0.05, float(item.get("confidence", 0.0)) * 0.5)
                 changed = True
         if changed:
             self.memory.save_knowledge(game_id, knowledge)
