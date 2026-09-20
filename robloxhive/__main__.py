@@ -1,8 +1,83 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 from robloxhive import __version__
+
+
+def _run_dashboard(args: argparse.Namespace) -> None:
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise SystemExit(
+            "Dashboard dependencies are missing. Install with: pip install -e .[brain]"
+        ) from exc
+    uvicorn.run(
+        "robloxhive.interface.dashboard:create_app",
+        host=args.host,
+        port=args.port,
+        factory=True,
+    )
+
+
+def _run_body(args: argparse.Namespace) -> None:
+    if os.name != "nt":
+        raise SystemExit("The Roblox Body Node is Windows-only.")
+
+    from robloxhive.body.bridge import BodyBridge
+    from robloxhive.body.discovery import discover_roblox_windows
+    from robloxhive.body.factory import create_generic_skill_executor
+
+    windows = discover_roblox_windows()
+
+    if args.list_windows:
+        if not windows:
+            print("No Roblox windows detected.")
+            return
+        for item in windows:
+            print(f"PID={item.pid} HWND={item.hwnd} TITLE={item.title!r}")
+        return
+
+    if args.pid is not None:
+        matches = [item for item in windows if item.pid == args.pid]
+        if len(matches) != 1:
+            raise SystemExit(f"Could not find exactly one Roblox window for PID {args.pid}.")
+        instance = matches[0]
+    else:
+        if len(windows) != 1:
+            raise SystemExit(
+                "More than one (or zero) Roblox window detected. "
+                "Run with --list-windows, then pass the bot PID explicitly with --pid."
+            )
+        instance = windows[0]
+
+    executor = create_generic_skill_executor(
+        hwnd=instance.hwnd,
+        game_id=args.game_id,
+        template_root=args.template_root,
+    )
+    bridge = BodyBridge(
+        brain_url=args.brain_url,
+        executor=executor,
+        agent_id=args.agent_id,
+        metadata={
+            "pid": instance.pid,
+            "hwnd": instance.hwnd,
+            "title": instance.title,
+            "game_id": args.game_id,
+            "input_backend": "win32-message",
+            "perception": "template-vision",
+        },
+    )
+
+    print(f"RobloxHive Body {__version__}")
+    print(f"Agent   : {args.agent_id}")
+    print(f"PID/HWND: {instance.pid}/{instance.hwnd}")
+    print(f"Game ID : {args.game_id}")
+    print(f"Brain   : {args.brain_url}")
+    print(f"Skills  : {', '.join(executor.available())}")
+    bridge.run_forever()
 
 
 def main() -> None:
@@ -13,25 +88,27 @@ def main() -> None:
     dashboard.add_argument("--host", default="127.0.0.1")
     dashboard.add_argument("--port", type=int, default=8765)
 
+    body = sub.add_parser("body", help="run the Windows Roblox Body Node")
+    body.add_argument("--brain-url", default="http://127.0.0.1:8765")
+    body.add_argument("--agent-id", default="agent-01")
+    body.add_argument("--game-id", type=int, default=0)
+    body.add_argument("--pid", type=int)
+    body.add_argument("--template-root", default="data/templates")
+    body.add_argument("--list-windows", action="store_true")
+
     args = parser.parse_args()
 
     if args.command == "dashboard":
-        try:
-            import uvicorn
-        except ImportError as exc:
-            raise SystemExit(
-                "Dashboard dependencies are missing. Install with: pip install -e .[brain]"
-            ) from exc
-        uvicorn.run(
-            "robloxhive.interface.dashboard:create_app",
-            host=args.host,
-            port=args.port,
-            factory=True,
-        )
+        _run_dashboard(args)
+        return
+    if args.command == "body":
+        _run_body(args)
         return
 
     print(f"RobloxHive {__version__}")
-    print("Run 'python -m robloxhive dashboard' to start the dashboard.")
+    print("Commands:")
+    print("  python -m robloxhive dashboard")
+    print("  python -m robloxhive body --list-windows")
 
 
 if __name__ == "__main__":
