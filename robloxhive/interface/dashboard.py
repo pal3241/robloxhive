@@ -73,14 +73,26 @@ class ManualSkillResult(BaseModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
 
 
+class PerceptionProbeRequest(BaseModel):
+    agent_id: str = "agent-01"
+    label: str = Field(min_length=1, max_length=160)
+
+
+class PerceptionProbeResult(BaseModel):
+    agent_id: str
+    probe_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.5.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="0.6.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     runtime = AgentRuntime(memory)
     instances = InstanceManager()
     body_nodes: dict[str, dict[str, Any]] = {}
     manual_tests: dict[str, dict[str, Any]] = {}
+    perception_probes: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
 
     def body_snapshot() -> list[dict[str, Any]]:
@@ -132,7 +144,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         online_bodies = sum(1 for body in body_snapshot() if body["online"])
         return {
             "ok": True,
-            "version": "0.5.0",
+            "version": "0.6.0",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
             "active_plan": active.id if active else None,
             "online_bodies": online_bodies,
@@ -288,6 +300,60 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             key=lambda item: item.get("created_at", 0),
             reverse=True,
         )[:30]
+
+    @app.post("/api/body/perception/probe")
+    def probe_perception(request: PerceptionProbeRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+
+        probe_id = uuid4().hex[:12]
+        perception_probes[probe_id] = {
+            "probe_id": probe_id,
+            "agent_id": request.agent_id,
+            "label": request.label,
+            "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(
+            Command(
+                source="dashboard",
+                type="PERCEPTION_PROBE",
+                payload={
+                    "probe_id": probe_id,
+                    "agent_id": request.agent_id,
+                    "label": request.label,
+                },
+            )
+        )
+        return perception_probes[probe_id]
+
+    @app.get("/api/body/perception/probes")
+    def get_perception_probes() -> list[dict[str, Any]]:
+        return sorted(
+            perception_probes.values(),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )[:30]
+
+    @app.post("/api/body/perception-results")
+    def perception_result(request: PerceptionProbeResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+            node["last_perception"] = request.result
+        if request.probe_id and request.probe_id in perception_probes:
+            perception_probes[request.probe_id].update(
+                status="complete",
+                result=request.result,
+                finished_at=time.time(),
+            )
+            return perception_probes[request.probe_id]
+        return {
+            "status": "orphan_result",
+            "agent_id": request.agent_id,
+            "result": request.result,
+        }
 
     @app.get("/api/body/commands/next")
     def next_body_command(agent_id: str = "agent-01", timeout: float = 0.0) -> dict | None:
