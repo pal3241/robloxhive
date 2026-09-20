@@ -179,9 +179,12 @@ class GenericVisualSkills:
                 and abs(after.area - before.area) > max(before.area * 0.18, 1.0)
             )
         )
+        verified = target is None or changed
         return ActionResult(
             action="interact",
-            status=ActionStatus.SUCCESS,
+            status=ActionStatus.SUCCESS if verified else ActionStatus.FAILED,
+            error=None if verified else "INTERACTION_NOT_VERIFIED",
+            recoverable=not verified,
             details={
                 **details,
                 "target": target,
@@ -189,6 +192,7 @@ class GenericVisualSkills:
                 "evidence": {
                     "interaction_sent": True,
                     "visual_change": changed,
+                    "verified": changed if target else False,
                 },
             },
         )
