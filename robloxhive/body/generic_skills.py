@@ -43,10 +43,12 @@ class GenericVisualSkills:
         perception: PerceptionAdapter,
         input_backend: SkillInput,
         config: SkillConfig | None = None,
+        navigator: Any | None = None,
     ) -> None:
         self.perception = perception
         self.input = input_backend
         self.config = config or SkillConfig()
+        self.navigator = navigator
 
     @staticmethod
     def _target(payload: dict[str, Any]) -> str | None:
@@ -98,6 +100,13 @@ class GenericVisualSkills:
         cfg = self.config
         near = near_area_ratio if near_area_ratio is not None else cfg.near_area_ratio
         iterations = max_iterations or cfg.max_iterations
+
+        if self.navigator is not None:
+            return self.navigator.navigate_to(
+                label,
+                near_area_ratio=near,
+                max_iterations=iterations,
+            )
         lost = 0
         last: Detection | None = None
 
