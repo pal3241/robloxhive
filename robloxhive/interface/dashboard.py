@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -12,6 +14,7 @@ from robloxhive.body.instances import InstanceManager, ProtectedInstanceError
 from robloxhive.brain.learning import LearningManager
 from robloxhive.brain.memory import GameMemory
 from robloxhive.brain.runtime import AgentRuntime
+from robloxhive.shared.command_bus import Command
 from robloxhive.shared.models import ActionResult, Goal
 
 
@@ -38,20 +41,56 @@ class GoalRequest(BaseModel):
     persistent: bool = True
 
 
+class BodyRegistration(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=80)
+    skills: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class BodyResultRequest(BaseModel):
+    agent_id: str = "agent-01"
     plan_id: str
     step_index: int = Field(ge=0)
     result: ActionResult
     evidence: dict[str, Any] = Field(default_factory=dict)
 
 
+class ManualSkillRequest(BaseModel):
+    agent_id: str = "agent-01"
+    skill: Literal["navigate", "collect", "interact", "follow_player"]
+    target: str = Field(min_length=1, max_length=160)
+    game_id: int | None = Field(default=None, gt=0)
+    instruction: str | None = Field(default=None, max_length=500)
+    iterations: int | None = Field(default=None, ge=1, le=300)
+    key: str | None = Field(default=None, max_length=32)
+
+
+class ManualSkillResult(BaseModel):
+    agent_id: str
+    test_id: str | None = None
+    skill: str | None = None
+    result: ActionResult
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.4.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="0.5.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     runtime = AgentRuntime(memory)
     instances = InstanceManager()
+    body_nodes: dict[str, dict[str, Any]] = {}
+    manual_tests: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
+
+    def body_snapshot() -> list[dict[str, Any]]:
+        now = time.time()
+        items = []
+        for node in body_nodes.values():
+            copy = dict(node)
+            copy["online"] = now - float(copy.get("last_seen", 0)) <= 15.0
+            items.append(copy)
+        return sorted(items, key=lambda item: item.get("agent_id", ""))
 
     def scan_instances() -> list[dict]:
         discovered = discover_roblox_windows()
@@ -90,11 +129,13 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.get("/api/health")
     def health() -> dict:
         active = runtime.get_plan()
+        online_bodies = sum(1 for body in body_snapshot() if body["online"])
         return {
             "ok": True,
-            "version": "0.4.0",
+            "version": "0.5.0",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
             "active_plan": active.id if active else None,
+            "online_bodies": online_bodies,
         }
 
     @app.get("/api/instances")
@@ -187,10 +228,72 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             raise HTTPException(status_code=404, detail="Plan not found")
         return plan.model_dump(mode="json")
 
+    @app.post("/api/body/register")
+    def register_body(request: BodyRegistration) -> dict:
+        previous = body_nodes.get(request.agent_id, {})
+        body_nodes[request.agent_id] = {
+            **previous,
+            "agent_id": request.agent_id,
+            "skills": sorted(set(request.skills)),
+            "metadata": request.metadata,
+            "last_seen": time.time(),
+        }
+        return {"ok": True, "agent_id": request.agent_id}
+
+    @app.get("/api/body/nodes")
+    def get_body_nodes() -> list[dict[str, Any]]:
+        return body_snapshot()
+
+    @app.post("/api/body/skills/test")
+    def test_body_skill(request: ManualSkillRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+        if request.skill not in node.get("skills", []):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Body does not advertise skill: {request.skill}",
+            )
+
+        test_id = uuid4().hex[:12]
+        payload: dict[str, Any] = {
+            "test_id": test_id,
+            "agent_id": request.agent_id,
+            "skill": request.skill,
+            "target": request.target,
+            "instruction": request.instruction or f"{request.skill} {request.target}",
+        }
+        if request.game_id is not None:
+            payload["game_id"] = request.game_id
+        if request.iterations is not None:
+            payload["iterations"] = request.iterations
+        if request.key:
+            payload["key"] = request.key
+
+        manual_tests[test_id] = {
+            "test_id": test_id,
+            "agent_id": request.agent_id,
+            "skill": request.skill,
+            "target": request.target,
+            "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(Command(source="dashboard", type="EXECUTE_SKILL", payload=payload))
+        return manual_tests[test_id]
+
+    @app.get("/api/body/skill-tests")
+    def get_skill_tests() -> list[dict[str, Any]]:
+        return sorted(
+            manual_tests.values(),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )[:30]
+
     @app.get("/api/body/commands/next")
     def next_body_command(agent_id: str = "agent-01", timeout: float = 0.0) -> dict | None:
-        # agent_id is reserved for routing when multi-agent support arrives.
-        _ = agent_id
+        node = body_nodes.get(agent_id)
+        if node:
+            node["last_seen"] = time.time()
         command = runtime.next_command(timeout=max(0.0, min(timeout, 5.0)))
         if command is None:
             return None
@@ -202,6 +305,10 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
 
     @app.post("/api/body/results")
     def body_result(request: BodyResultRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+            node["last_result"] = request.result.model_dump(mode="json")
         try:
             plan = runtime.record_result(
                 request.plan_id,
@@ -212,5 +319,25 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         except (KeyError, IndexError, ValueError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return plan.model_dump(mode="json")
+
+    @app.post("/api/body/manual-results")
+    def manual_result(request: ManualSkillResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+            node["last_result"] = request.result.model_dump(mode="json")
+        if request.test_id and request.test_id in manual_tests:
+            manual_tests[request.test_id].update(
+                status="complete",
+                result=request.result.model_dump(mode="json"),
+                evidence=request.evidence,
+                finished_at=time.time(),
+            )
+            return manual_tests[request.test_id]
+        return {
+            "status": "orphan_result",
+            "agent_id": request.agent_id,
+            "result": request.result.model_dump(mode="json"),
+        }
 
     return app
