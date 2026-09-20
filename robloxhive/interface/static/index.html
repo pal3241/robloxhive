@@ -35,6 +35,7 @@
     <button class="tab" data-tab="instances">Instances</button>
     <button class="tab" data-tab="learn">Belajar</button>
     <button class="tab" data-tab="agent">Agent</button>
+    <button class="tab" data-tab="skills">Skills</button>
     <button class="tab" data-tab="memory">Memory</button>
   </nav>
 
@@ -97,6 +98,45 @@
     </div>
   </section>
 
+
+  <section id="skills" class="view">
+    <div class="grid">
+      <div class="card">
+        <div class="row"><div><h2>Windows Body Skills</h2><div class="muted">Skill yang benar-benar dilaporkan Body Node.</div></div><button id="refreshBodies" class="secondary" type="button">Refresh</button></div>
+        <div id="bodyNodes"><p class="muted">Belum ada Body terhubung.</p></div>
+      </div>
+      <form id="skillTestForm" class="card">
+        <h2>Test Skill</h2>
+        <label>Body</label><select id="skillAgent"><option value="">Pilih Body...</option></select>
+        <label>Skill</label>
+        <select id="skillName">
+          <option value="navigate">navigate</option>
+          <option value="collect">collect</option>
+          <option value="interact">interact</option>
+          <option value="follow_player">follow_player</option>
+        </select>
+        <label>Target / template label</label><input id="skillTarget" placeholder="shop / fuel / door / Fahri" required>
+        <label>Game ID (optional)</label><input id="skillGameId" type="number" min="1" placeholder="Game/Universe ID">
+        <label>Iterations (follow_player)</label><input id="skillIterations" type="number" min="1" max="300" placeholder="contoh 60">
+        <label>Interact key (optional)</label><input id="skillKey" placeholder="interact atau e">
+        <button type="submit">Run Skill Test</button>
+        <p id="skillMessage" class="muted"></p>
+        <div class="meta">Template default: data/templates/&lt;game_id&gt;/&lt;label&gt;/*.png</div>
+      </form>
+      <div class="card">
+        <h2>Skill Behavior</h2>
+        <div class="item"><b>navigate</b><div class="meta">Cari target visual → center/steer → maju sampai ukuran target menunjukkan sudah dekat.</div></div>
+        <div class="item"><b>collect</b><div class="meta">Navigate → interact → verifikasi perubahan/disappearance target.</div></div>
+        <div class="item"><b>interact</b><div class="meta">Navigate bila ada target → kirim tombol interact → cek perubahan visual.</div></div>
+        <div class="item"><b>follow_player</b><div class="meta">Track template player → jaga target di tengah dan dalam distance band.</div></div>
+      </div>
+      <div class="card">
+        <h2>Recent Skill Tests</h2>
+        <div id="skillTests"><p class="muted">Belum ada test.</p></div>
+      </div>
+    </div>
+  </section>
+
   <section id="memory" class="view">
     <div class="memory-layout">
       <div class="card"><h2>Game Memory</h2><div id="games"></div></div>
@@ -113,7 +153,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}}));
 async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
 async function loadInstances(){const root=$('#instanceList');root.innerHTML='<p class="muted">Scanning…</p>';try{const items=await api('/api/instances');root.innerHTML=items.length?'':'<p class="muted">Tidak ada Roblox window terdeteksi.</p>';items.forEach(i=>{const div=document.createElement('div');div.className='item';div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN BOT-01</button></div>';div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot','agent-01');root.appendChild(div)})}catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 async function setRole(pid,role,agent_id=null){await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});loadInstances()}
@@ -176,7 +216,58 @@ $('#goalForm').addEventListener('submit',async e=>{
 });
 $('#refreshPlan').onclick=loadActivePlan;
 
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan()},2000);
+
+async function loadBodies(){
+  const root=$('#bodyNodes'), select=$('#skillAgent');
+  try{
+    const nodes=await api('/api/body/nodes');
+    root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Windows Body terhubung.</p>';
+    select.innerHTML='<option value="">Pilih Body...</option>';
+    nodes.forEach(n=>{
+      const div=document.createElement('div');
+      div.className='item';
+      const online=n.online?'online':'offline';
+      div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+online+'</span><div class="meta">Skills: '+esc((n.skills||[]).join(', ')||'-')+'</div><div class="meta">PID '+esc(n.metadata?.pid||'-')+' · HWND '+esc(n.metadata?.hwnd||'-')+' · Game '+esc(n.metadata?.game_id||'-')+'</div>';
+      root.appendChild(div);
+      if(n.online){
+        const o=document.createElement('option');o.value=n.agent_id;o.textContent=n.agent_id+' · '+(n.skills||[]).join(', ');select.appendChild(o);
+      }
+    });
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+$('#refreshBodies').onclick=()=>{loadBodies();loadSkillTests()};
+$('#skillTestForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  $('#skillMessage').textContent='Mengirim skill ke Windows Body…';
+  try{
+    const body={
+      agent_id:$('#skillAgent').value,
+      skill:$('#skillName').value,
+      target:$('#skillTarget').value.trim(),
+      game_id:$('#skillGameId').value?Number($('#skillGameId').value):null,
+      iterations:$('#skillIterations').value?Number($('#skillIterations').value):null,
+      key:$('#skillKey').value.trim()||null
+    };
+    const result=await api('/api/body/skills/test',{method:'POST',body:JSON.stringify(body)});
+    $('#skillMessage').textContent='Test '+result.test_id+' queued.';
+    loadSkillTests();
+  }catch(err){$('#skillMessage').textContent=err.message}
+});
+async function loadSkillTests(){
+  const root=$('#skillTests');
+  try{
+    const tests=await api('/api/body/skill-tests');
+    root.innerHTML=tests.length?'':'<p class="muted">Belum ada test.</p>';
+    tests.slice(0,12).forEach(t=>{
+      const d=document.createElement('div');d.className='item';
+      const status=t.result?.status||t.status;
+      d.innerHTML='<b>'+esc(t.skill)+'</b> → '+esc(t.target)+' <span class="pill">'+esc(status)+'</span><div class="meta">'+esc(t.agent_id)+' · '+esc(t.test_id)+'</div>'+(t.result?.error?'<div class="bad">'+esc(t.result.error)+'</div>':'')+(t.evidence?'<pre>'+esc(JSON.stringify(t.evidence,null,2))+'</pre>':'');
+      root.appendChild(d);
+    });
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+
+health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}},2000);
 </script>
 </body>
 </html>
