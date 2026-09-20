@@ -54,6 +54,7 @@ class AgentRuntime:
                     "game_id": plan.game_id,
                     "step_index": step.index,
                     "skill": step.skill,
+                    "target": step.metadata.get("target") or plan.goal.target,
                     "instruction": step.instruction,
                     "success_condition": step.success_condition,
                     "metadata": step.metadata,
