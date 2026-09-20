@@ -73,6 +73,7 @@ class RuntimeTests(unittest.TestCase):
                     status=ActionStatus.SUCCESS,
                     details={"observed": "objective advanced"},
                 ),
+                evidence={"verified": True, "observed": "objective advanced"},
             )
             self.assertEqual(updated.steps[0].status, StepStatus.COMPLETE)
             self.assertIn(updated.status, {PlanStatus.RUNNING, PlanStatus.COMPLETE})
