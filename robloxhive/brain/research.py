@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from typing import Callable, Any
+from urllib.parse import urlparse
+
+
+ProgressCallback = Callable[[str, int, int], None]
+
+
+@dataclass(slots=True)
+class ResearchSource:
+    query: str
+    title: str
+    url: str
+    snippet: str
+    content: str
+    quality: float
+    extracted: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class InternetResearcher:
+    """Internet research pipeline for learning how a Roblox game works.
+
+    Search and page extraction are intentionally isolated behind this class so a
+    different provider can replace DDGS later without changing the dashboard or
+    memory format.
+    """
+
+    QUERY_TEMPLATES = (
+        "{game} Roblox beginner guide tutorial",
+        "{game} Roblox full walkthrough start to finish",
+        "{game} Roblox progression guide wiki",
+        "{game} Roblox tips tricks strategy",
+        "{game} Roblox best items weapons classes upgrades",
+        "{game} Roblox how to win ending complete guide",
+    )
+
+    def __init__(self, timeout: int = 10, max_content_chars: int = 40000) -> None:
+        self.timeout = timeout
+        self.max_content_chars = max_content_chars
+
+    def build_queries(self, game_name: str, objective: str | None = None) -> list[str]:
+        game = game_name.strip()
+        queries = [template.format(game=game) for template in self.QUERY_TEMPLATES]
+        if objective and objective.strip():
+            queries.append(f"{game} Roblox {objective.strip()}")
+        return queries
+
+    @staticmethod
+    def _quality(url: str) -> float:
+        host = urlparse(url).netloc.lower()
+        if host.endswith("roblox.com"):
+            return 0.90
+        if "wiki" in host or "fandom.com" in host:
+            return 0.78
+        if "youtube.com" in host or "youtu.be" in host:
+            return 0.72
+        if "reddit.com" in host:
+            return 0.58
+        return 0.55
+
+    def research(
+        self,
+        game_name: str,
+        objective: str | None = None,
+        max_results_per_query: int = 4,
+        max_pages: int = 14,
+        progress: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
+        try:
+            from ddgs import DDGS
+        except ImportError as exc:
+            raise RuntimeError(
+                "Internet research requires the 'ddgs' package. "
+                "Install RobloxHive with the brain extra."
+            ) from exc
+
+        queries = self.build_queries(game_name, objective)
+        ddgs = DDGS(timeout=self.timeout)
+        search_results: list[tuple[str, dict[str, str]]] = []
+
+        for index, query in enumerate(queries, start=1):
+            if progress:
+                progress("searching", index - 1, len(queries))
+            try:
+                results = ddgs.text(
+                    query,
+                    region="wt-wt",
+                    safesearch="moderate",
+                    max_results=max_results_per_query,
+                    backend="auto",
+                )
+            except Exception:
+                results = []
+            for result in results or []:
+                search_results.append((query, result))
+            if progress:
+                progress("searching", index, len(queries))
+
+        deduped: list[tuple[str, dict[str, str]]] = []
+        seen: set[str] = set()
+        for query, result in search_results:
+            url = (result.get("href") or result.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            deduped.append((query, result))
+
+        selected = deduped[:max_pages]
+        sources: list[ResearchSource] = []
+
+        for index, (query, result) in enumerate(selected, start=1):
+            if progress:
+                progress("extracting", index - 1, max(len(selected), 1))
+            url = (result.get("href") or result.get("url") or "").strip()
+            content = ""
+            extracted = False
+            try:
+                page = ddgs.extract(url, fmt="text_markdown")
+                raw = page.get("content", "") if isinstance(page, dict) else ""
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", errors="replace")
+                content = str(raw)[: self.max_content_chars]
+                extracted = bool(content.strip())
+            except Exception:
+                # Search snippets are still useful when a site blocks extraction.
+                content = ""
+
+            sources.append(
+                ResearchSource(
+                    query=query,
+                    title=(result.get("title") or url).strip(),
+                    url=url,
+                    snippet=(result.get("body") or "").strip(),
+                    content=content,
+                    quality=self._quality(url),
+                    extracted=extracted,
+                )
+            )
+            if progress:
+                progress("extracting", index, max(len(selected), 1))
+
+        # Candidate notes are deliberately traceable to a URL. A later LLM
+        # synthesizer may turn this corpus into richer structured knowledge.
+        candidates: list[dict[str, Any]] = []
+        for source in sources:
+            text = source.snippet.strip()
+            if text:
+                candidates.append(
+                    {
+                        "text": text[:800],
+                        "source_url": source.url,
+                        "confidence": round(source.quality * 0.75, 2),
+                        "verified_in_game": False,
+                    }
+                )
+
+        return {
+            "game_name": game_name,
+            "objective": objective or "learn the game from beginner to completion",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "queries": queries,
+            "source_count": len(sources),
+            "extracted_count": sum(1 for source in sources if source.extracted),
+            "sources": [source.to_dict() for source in sources],
+            "candidate_knowledge": candidates,
+        }
