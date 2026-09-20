@@ -90,6 +90,19 @@ class BodyBridge:
             )
             return command
 
+        if command.get("type") == "NAVIGATION_PROBE":
+            result = self.executor.navigation_probe()
+            self._json(
+                "/api/body/navigation-results",
+                method="POST",
+                payload={
+                    "agent_id": self.agent_id,
+                    "probe_id": payload.get("probe_id"),
+                    "result": result,
+                },
+            )
+            return command
+
         if command.get("type") != "EXECUTE_SKILL":
             return command
 
