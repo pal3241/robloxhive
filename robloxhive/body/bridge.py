@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from robloxhive.body.skills import SkillExecutor
-from robloxhive.shared.models import ActionResult
+from robloxhive.shared.models import ActionResult, ActionStatus
 
 
 class BodyBridge:
@@ -33,6 +33,7 @@ class BodyBridge:
         self.executor_factory = executor_factory
         self.rebind_factory = rebind_factory
         self.running = False
+        self.armed = False
         self._last_register = 0.0
 
     def _json(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
@@ -53,7 +54,7 @@ class BodyBridge:
             return True
         try:
             description = self.executor.describe()
-            live_metadata = dict(self.metadata)
+            live_metadata = {**self.metadata, "armed": self.armed}
             if os.name == "nt":
                 try:
                     from robloxhive.body.discovery import discover_roblox_windows
@@ -81,7 +82,8 @@ class BodyBridge:
             return False
 
     def poll_once(self, wait_s: float = 1.0) -> dict[str, Any] | None:
-        self.executor.autonomy_tick()
+        if self.armed:
+            self.executor.autonomy_tick()
         self.register()
         query = urlencode({"agent_id": self.agent_id, "timeout": max(0.0, min(wait_s, 5.0))})
         try:
@@ -136,6 +138,7 @@ class BodyBridge:
                         pass
                     self.executor = executor
                     self.metadata.update(new_metadata)
+                    self.armed = True
                     self.register(force=True)
                     result = {
                         "ok": True,
@@ -161,10 +164,24 @@ class BodyBridge:
             )
             return command
 
+        if command.get("type") == "DISARM":
+            requested_pid = int(payload.get("pid") or 0)
+            current_pid = int(self.metadata.get("pid") or 0)
+            if requested_pid in {0, current_pid}:
+                try:
+                    self.executor.direct_control({"action": "release"})
+                except Exception:
+                    pass
+                self.armed = False
+                self.register(force=True)
+            return command
+
         if command.get("type") == "JOIN_GAME":
             place_id = int(payload.get("place_id") or 0)
             result: dict[str, Any]
-            if place_id <= 0:
+            if not self.armed:
+                result = {"ok": False, "error": "BODY_NOT_ARMED"}
+            elif place_id <= 0:
                 result = {"ok": False, "error": "INVALID_PLACE_ID"}
             elif os.name != "nt":
                 result = {"ok": False, "error": "JOIN_GAME_WINDOWS_ONLY"}
@@ -205,7 +222,11 @@ class BodyBridge:
             return command
 
         if command.get("type") == "DIRECT_INPUT":
-            result = self.executor.direct_control(payload)
+            result = (
+                self.executor.direct_control(payload)
+                if self.armed
+                else {"ok": False, "error": "BODY_NOT_ARMED"}
+            )
             self._json(
                 "/api/body/control-results",
                 method="POST",
@@ -234,7 +255,16 @@ class BodyBridge:
             return command
 
         skill = str(payload.get("skill") or "")
-        result = self.executor.execute(skill, payload)
+        if self.armed:
+            result = self.executor.execute(skill, payload)
+        else:
+            result = ActionResult(
+                action=skill,
+                status=ActionStatus.BLOCKED,
+                error="BODY_NOT_ARMED",
+                recoverable=True,
+                details={"message": "Assign this Roblox window to the Body from Dashboard > Instances first."},
+            )
         evidence = result.details.get("evidence") if isinstance(result.details, dict) else None
         evidence_payload = evidence if isinstance(evidence, dict) else result.details
 
