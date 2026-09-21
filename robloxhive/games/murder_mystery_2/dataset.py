@@ -214,17 +214,23 @@ class MM2DatasetRecorder:
             raise FileNotFoundError(sample_id)
         data = json.loads(path.read_text(encoding="utf-8"))
         clean: list[dict[str, Any]] = []
+        image_w = max(1.0, float(data.get("width", 1)))
+        image_h = max(1.0, float(data.get("height", 1)))
         for box in boxes:
             label = str(box.get("label", "")).lower().strip()
             if label not in self.classes:
                 continue
+            x = min(image_w - 1.0, max(0.0, float(box.get("x", 0.0))))
+            y = min(image_h - 1.0, max(0.0, float(box.get("y", 0.0))))
+            width = min(image_w - x, max(1.0, float(box.get("width", 1.0))))
+            height = min(image_h - y, max(1.0, float(box.get("height", 1.0))))
             clean.append(
                 {
                     "label": label,
-                    "x": max(0.0, float(box.get("x", 0.0))),
-                    "y": max(0.0, float(box.get("y", 0.0))),
-                    "width": max(1.0, float(box.get("width", 1.0))),
-                    "height": max(1.0, float(box.get("height", 1.0))),
+                    "x": x,
+                    "y": y,
+                    "width": width,
+                    "height": height,
                     "confidence": float(box.get("confidence", 1.0)),
                     "source": str(box.get("source", "manual")),
                     "approved": bool(box.get("approved", True)),
