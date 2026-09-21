@@ -9,11 +9,11 @@ description = "Modular brain/body architecture for an autonomous Roblox agent"
 requires-python = ">=3.11"
 dependencies = [
   "pydantic>=2.7",
-  "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
 windows = [
+  "psutil>=5.9",
   "pywin32>=306",
   "pyrobloxbot",
   "pydirectinput",
@@ -39,6 +39,7 @@ all = [
   "websockets>=13",
   "aiosqlite>=0.20",
   "ddgs>=9.16,<10",
+  "psutil>=5.9",
   "pywin32>=306",
   "pyrobloxbot",
   "pydirectinput",
