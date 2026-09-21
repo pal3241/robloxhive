@@ -653,19 +653,26 @@ $('#refreshPlan').onclick=()=>{loadAgentGames();loadActivePlan()};
 async function loadBodies(){
   const root=$('#bodyNodes'), select=$('#skillAgent');
   try{
-    const nodes=await api('/api/body/nodes');
-    root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Windows Body terhubung.</p>';
-    select.innerHTML='<option value="">Pilih Body...</option>';
-    nodes.forEach(n=>{
-      const div=document.createElement('div');
-      div.className='item';
-      const online=n.online?'online':'offline';
-      div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+online+'</span><div class="meta">Skills: '+esc((n.skills||[]).join(', ')||'-')+'</div><div class="meta">PID '+esc(n.metadata?.pid||'-')+' · HWND '+esc(n.metadata?.hwnd||'-')+' · Game '+esc(n.metadata?.game_id||'-')+'</div>';
-      root.appendChild(div);
-      if(n.online){
-        const o=document.createElement('option');o.value=n.agent_id;o.textContent=n.agent_id+' · '+(n.skills||[]).join(', ');select.appendChild(o);
-      }
-    });
+    const nodes=await getBodies();
+    const signature=JSON.stringify(nodes.map(n=>[n.agent_id,n.online,n.metadata?.pid,n.metadata?.hwnd,bodyGameId(n),n.metadata?.armed,n.skills]));
+    if(root.dataset.signature!==signature){
+      root.dataset.signature=signature;
+      root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Windows Body terhubung.</p>';
+      nodes.forEach(n=>{
+        const div=document.createElement('div');
+        div.className='item';
+        const online=n.online?'online':'offline';
+        div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+online+'</span>'+
+          '<div class="meta">Skills: '+esc((n.skills||[]).join(', ')||'-')+'</div>'+
+          '<div class="meta">PID '+esc(n.metadata?.pid||'-')+' · HWND '+esc(n.metadata?.hwnd||'-')+' · Game '+esc(bodyGameId(n)||'-')+' · '+(n.metadata?.armed?'ARMED':'DISARMED')+'</div>';
+        root.appendChild(div);
+      });
+    }
+    syncSelect(
+      select,
+      nodes.filter(n=>n.online).map(n=>({value:n.agent_id,label:n.agent_id+' · '+(n.skills||[]).join(', ')})),
+      'Pilih Body...'
+    );
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 }
 $('#refreshBodies').onclick=()=>{loadBodies();loadSkillTests()};
