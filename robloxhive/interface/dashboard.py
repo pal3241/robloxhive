@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -10,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from robloxhive.body.discovery import discover_roblox_windows
-from robloxhive.body.instances import InstanceManager, ProtectedInstanceError
+from robloxhive.body.instances import InstanceManager, ProtectedInstanceError, RobloxInstance
 from robloxhive.brain.learning import LearningManager
 from robloxhive.brain.memory import GameMemory
 from robloxhive.brain.runtime import AgentRuntime
@@ -45,6 +46,17 @@ class BodyRegistration(BaseModel):
     agent_id: str = Field(min_length=1, max_length=80)
     skills: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class JoinGameRequest(BaseModel):
+    agent_id: str = "agent-01"
+    place_id: int = Field(gt=0)
+
+
+class JoinGameResult(BaseModel):
+    agent_id: str
+    join_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
 
 
 class BodyResultRequest(BaseModel):
@@ -129,6 +141,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     perception_probes: dict[str, dict[str, Any]] = {}
     navigation_probes: dict[str, dict[str, Any]] = {}
     game_controls: dict[str, dict[str, Any]] = {}
+    join_requests: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
 
     def body_snapshot() -> list[dict[str, Any]]:
@@ -141,9 +154,27 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         return sorted(items, key=lambda item: item.get("agent_id", ""))
 
     def scan_instances() -> list[dict]:
-        discovered = discover_roblox_windows()
-        known = {item.pid: item for item in instances.list()}
+        # Brain may run on Android/Linux, so Windows discovery must come from
+        # connected Body nodes instead of scanning the Brain host.
+        discovered = []
+        if os.name == "nt":
+            discovered.extend(discover_roblox_windows())
+        for node in body_nodes.values():
+            metadata = node.get("metadata") or {}
+            for row in metadata.get("windows") or []:
+                try:
+                    discovered.append(
+                        RobloxInstance(
+                            pid=int(row["pid"]),
+                            hwnd=int(row["hwnd"]),
+                            title=str(row.get("title") or "Roblox"),
+                            alive=bool(row.get("alive", True)),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
 
+        known = {item.pid: item for item in instances.list()}
         discovered_pids = {item.pid for item in discovered}
         for item in discovered:
             previous = known.get(item.pid)
@@ -159,15 +190,11 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
 
         return [
             {
-                "pid": item.pid,
-                "hwnd": item.hwnd,
-                "title": item.title,
-                "role": item.role.value,
-                "agent_id": item.agent_id,
-                "protected": item.protected,
-                "alive": item.alive,
+                "pid": item.pid, "hwnd": item.hwnd, "title": item.title,
+                "role": item.role.value, "agent_id": item.agent_id,
+                "protected": item.protected, "alive": item.alive,
             }
-            for item in instances.list()
+            for item in instances.list() if item.alive
         ]
 
     @app.get("/", response_class=HTMLResponse)
@@ -291,6 +318,40 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.get("/api/body/nodes")
     def get_body_nodes() -> list[dict[str, Any]]:
         return body_snapshot()
+
+    @app.post("/api/body/join")
+    def join_game(request: JoinGameRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+        join_id = uuid4().hex[:12]
+        join_requests[join_id] = {
+            "join_id": join_id, "agent_id": request.agent_id,
+            "place_id": request.place_id, "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(Command(
+            source="dashboard", type="JOIN_GAME",
+            payload={"join_id": join_id, "agent_id": request.agent_id, "place_id": request.place_id},
+        ))
+        return join_requests[join_id]
+
+    @app.get("/api/body/joins")
+    def get_join_requests() -> list[dict[str, Any]]:
+        return sorted(join_requests.values(), key=lambda x: x.get("created_at", 0), reverse=True)[:30]
+
+    @app.post("/api/body/join-results")
+    def join_game_result(request: JoinGameResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+        if request.join_id and request.join_id in join_requests:
+            join_requests[request.join_id].update(
+                status="complete" if request.result.get("ok") else "failed",
+                result=request.result, finished_at=time.time(),
+            )
+            return join_requests[request.join_id]
+        return {"status": "orphan_result", "result": request.result}
 
     @app.post("/api/body/skills/test")
     def test_body_skill(request: ManualSkillRequest) -> dict:
