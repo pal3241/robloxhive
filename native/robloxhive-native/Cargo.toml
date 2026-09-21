@@ -1,0 +1,14 @@
+[package]
+name = "robloxhive-native"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+name = "robloxhive_native"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
