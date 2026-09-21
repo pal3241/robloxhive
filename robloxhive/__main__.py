@@ -2,8 +2,43 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
+import time
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from robloxhive import __version__
+
+
+def _ensure_local_ollama(base_url: str) -> subprocess.Popen | None:
+    parsed = urlparse(base_url)
+    if (parsed.hostname or "").lower() not in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    try:
+        with urlopen(base_url.rstrip("/") + "/api/tags", timeout=1.2):
+            return None
+    except Exception:
+        pass
+
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        process = subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+    except (OSError, FileNotFoundError):
+        return None
+
+    for _ in range(20):
+        time.sleep(0.25)
+        try:
+            with urlopen(base_url.rstrip("/") + "/api/tags", timeout=0.8):
+                return process
+        except Exception:
+            continue
+    return process
 
 
 def _run_single(args: argparse.Namespace) -> None:
@@ -59,6 +94,8 @@ def _run_single(args: argparse.Namespace) -> None:
             input_mode=args.input_mode,
         )
 
+    ollama_process = _ensure_local_ollama(args.ollama_url) if not args.no_auto_ollama else None
+
     executor = build_executor(game_id)
     runtime = SingleBotRuntime(
         executor,
@@ -85,6 +122,11 @@ def _run_single(args: argparse.Namespace) -> None:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     finally:
         runtime.stop()
+        if ollama_process is not None:
+            try:
+                ollama_process.terminate()
+            except OSError:
+                pass
 
 
 def _run_dashboard(args: argparse.Namespace) -> None:
@@ -222,6 +264,7 @@ def main() -> None:
     run.add_argument("--ollama-url", default=os.getenv("ROBLOXHIVE_OLLAMA_URL", "http://127.0.0.1:11434"))
     run.add_argument("--ollama-model", default=os.getenv("ROBLOXHIVE_LLM_MODEL", "qwen2.5:3b"))
     run.add_argument("--vision-llm", action="store_true")
+    run.add_argument("--no-auto-ollama", action="store_true", help="do not auto-start local ollama serve")
     run.add_argument("--memory", default="data/memory/robloxhive.db")
     run.add_argument("--decision-interval", type=float, default=0.55)
     run.add_argument(
