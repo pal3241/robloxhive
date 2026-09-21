@@ -96,6 +96,18 @@ class MM2Autonomy:
                 approved=bool(payload.get("approved", True)),
             )
             return {"ok": True, "sample": data, "dataset": self.dataset.status()}
+        elif action == "dataset_review":
+            if self.dataset is None:
+                return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
+            boxes = payload.get("boxes")
+            if not isinstance(boxes, list):
+                return {"ok": False, "error": "DATASET_REVIEW_BOXES_REQUIRED"}
+            data = self.dataset.review(
+                str(payload.get("sample_id") or ""),
+                boxes=boxes,
+                note=str(payload.get("note") or "") or None,
+            )
+            return {"ok": True, "sample": data, "dataset": self.dataset.status()}
         elif action == "dataset_export":
             if self.dataset is None:
                 return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
