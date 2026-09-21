@@ -23,6 +23,7 @@ class BodyBridge:
         timeout: float = 10.0,
         metadata: dict[str, Any] | None = None,
         executor_factory: Callable[[int], SkillExecutor] | None = None,
+        rebind_factory: Callable[[int, int], tuple[SkillExecutor, dict[str, Any]]] | None = None,
     ) -> None:
         self.brain_url = brain_url.rstrip("/")
         self.executor = executor
@@ -30,6 +31,7 @@ class BodyBridge:
         self.timeout = timeout
         self.metadata = metadata or {}
         self.executor_factory = executor_factory
+        self.rebind_factory = rebind_factory
         self.running = False
         self._last_register = 0.0
 
@@ -112,6 +114,48 @@ class BodyBridge:
                 payload={
                     "agent_id": self.agent_id,
                     "probe_id": payload.get("probe_id"),
+                    "result": result,
+                },
+            )
+            return command
+
+        if command.get("type") == "BIND_INSTANCE":
+            pid = int(payload.get("pid") or 0)
+            result: dict[str, Any]
+            if pid <= 0:
+                result = {"ok": False, "error": "INVALID_PID"}
+            elif self.rebind_factory is None:
+                result = {"ok": False, "error": "REBIND_NOT_SUPPORTED"}
+            else:
+                try:
+                    current_game = int(self.metadata.get("game_id") or 0)
+                    executor, new_metadata = self.rebind_factory(pid, current_game)
+                    try:
+                        self.executor.direct_control({"action": "release"})
+                    except Exception:
+                        pass
+                    self.executor = executor
+                    self.metadata.update(new_metadata)
+                    self.register(force=True)
+                    result = {
+                        "ok": True,
+                        "pid": self.metadata.get("pid"),
+                        "hwnd": self.metadata.get("hwnd"),
+                        "title": self.metadata.get("title"),
+                    }
+                except Exception as exc:
+                    result = {
+                        "ok": False,
+                        "error": type(exc).__name__,
+                        "message": str(exc),
+                        "pid": pid,
+                    }
+            self._json(
+                "/api/body/bind-results",
+                method="POST",
+                payload={
+                    "agent_id": self.agent_id,
+                    "bind_id": payload.get("bind_id"),
                     "result": result,
                 },
             )
