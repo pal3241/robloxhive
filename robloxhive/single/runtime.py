@@ -72,6 +72,8 @@ class SingleBotRuntime:
         self._last_tick = 0.0
         self._knowledge_mtime: dict[int, float] = {}
         self._last_game_context_check = 0.0
+        self._last_scene_signature: str | None = None
+        self._last_scene_change_at = time.monotonic()
 
     def start(self) -> None:
         if self.running:
@@ -258,6 +260,7 @@ class SingleBotRuntime:
                         confidence=max(0.1, min(confidence, 0.85)),
                         value=0.5,
                         metadata={"source": "internet_learning"},
+                        set_current=False,
                     )
         self._knowledge_mtime[self.game_id] = mtime
 
@@ -367,6 +370,7 @@ class SingleBotRuntime:
                         danger=float(item.get("danger") or 0.0),
                         value=float(item.get("value") or importance),
                         metadata={"source": "ollama_interpretation"},
+                        set_current=bool(item.get("current", False)),
                     )
 
     def _record_result(self, action: str, payload: dict[str, Any], result: Any, reason: str) -> dict[str, Any]:
@@ -420,6 +424,65 @@ class SingleBotRuntime:
             importance=0.7 if not success else 0.55,
         )
         return event
+
+    @staticmethod
+    def _scene_signature(world: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        import hashlib
+        ui = sorted(
+            {
+                str(text).strip().lower()
+                for text in world.get("ui_text", [])[:30]
+                if str(text).strip()
+            }
+        )
+        entities = []
+        for item in world.get("entities", [])[:40]:
+            if not isinstance(item, dict):
+                continue
+            box = item.get("box") or [0, 0, 0, 0]
+            entities.append(
+                (
+                    str(item.get("label") or "").lower(),
+                    round(float(box[0] or 0) / 80),
+                    round(float(box[1] or 0) / 80),
+                )
+            )
+        core = {"ui": ui, "entities": sorted(entities)}
+        raw = json.dumps(core, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        return hashlib.sha1(raw).hexdigest()[:12], core
+
+    def _update_scene_map(self, world: dict[str, Any]) -> None:
+        signature, core = self._scene_signature(world)
+        node = f"scene:{signature}"
+        if self._last_scene_signature is None:
+            self.semantic_map.observe_landmark(
+                node,
+                kind="visual_scene",
+                confidence=0.6,
+                value=0.25,
+                metadata=core,
+                set_current=True,
+            )
+            self._last_scene_signature = node
+            self._last_scene_change_at = time.monotonic()
+            return
+        if node == self._last_scene_signature:
+            return
+
+        now = time.monotonic()
+        previous = self._last_scene_signature
+        elapsed = max(0.05, now - self._last_scene_change_at)
+        self.semantic_map.observe_landmark(
+            node,
+            kind="visual_scene",
+            confidence=0.6,
+            value=0.25,
+            metadata=core,
+            set_current=True,
+        )
+        self.semantic_map.transition(previous, node, seconds=elapsed, success=True)
+        self._last_scene_signature = node
+        self._last_scene_change_at = now
 
     @staticmethod
     def _world_fingerprint(world: dict[str, Any]) -> str:
@@ -479,6 +542,7 @@ class SingleBotRuntime:
         snapshot = self.world.observe()
         world = snapshot.compact()
         self.last_world = world
+        self._update_scene_map(world)
 
         query = self._memory_query(world)
         memories = self.memory.retrieve(query, game_id=self.game_id, limit=18)
