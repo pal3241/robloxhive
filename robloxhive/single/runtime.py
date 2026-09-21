@@ -33,8 +33,10 @@ class SingleBotRuntime:
         memory_path: str = "data/memory/robloxhive.db",
         decision_interval_s: float = 0.55,
         vision_llm: bool = False,
+        executor_factory: Any | None = None,
     ) -> None:
         self.executor = executor
+        self.executor_factory = executor_factory
         self.game_id = int(game_id or 0)
         self.memory = CognitiveMemory(memory_path)
         self.semantic_map = SemanticMap(self.memory, self.game_id)
@@ -145,10 +147,24 @@ class SingleBotRuntime:
         game_id = int(game_id or 0)
         if game_id == self.game_id:
             return
-        self.game_id = game_id
         self.semantic_map.save()
+        if self.executor_factory is not None:
+            try:
+                self.executor = self.executor_factory(game_id)
+            except Exception as exc:
+                self.memory.remember(
+                    "failure",
+                    f"Could not rebuild executor for game {game_id}: {type(exc).__name__}: {exc}",
+                    game_id=self.game_id,
+                    key="executor_rebuild",
+                    confidence=1.0,
+                    success=False,
+                    importance=0.8,
+                )
+                raise
+        self.game_id = game_id
         self.semantic_map = SemanticMap(self.memory, self.game_id)
-        self.world.game_id = self.game_id
+        self.world = WorldModel(self.executor, self.game_id)
         self.memory.remember(
             "episodic",
             f"Switched current game context to {self.game_id}",
