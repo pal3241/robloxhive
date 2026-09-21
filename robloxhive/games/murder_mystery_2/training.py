@@ -46,7 +46,7 @@ def train_mm2_detector(
         best = Path(result.save_dir) / "weights" / "last.pt"
 
     export_model = YOLO(str(best))
-    exported = export_model.export(format="onnx", imgsz=imgsz, simplify=True)
+    exported = export_model.export(format="onnx", imgsz=imgsz, simplify=False, nms=None)
     exported_path = Path(str(exported))
 
     model_output_dir = Path(model_output_dir)
