@@ -24,6 +24,7 @@ def create_generic_skill_executor(
 ) -> SkillExecutor:
     capture = Win32WindowCapture(hwnd)
     adapters = []
+    player_tracker = None
     metadata: dict[str, object] = {
         "game_id": int(game_id) if str(game_id).isdigit() else str(game_id),
         "template_fallback": True,
@@ -61,10 +62,14 @@ def create_generic_skill_executor(
     if enable_ocr:
         ocr = UiTextDetector(capture)
         if ocr.available:
+            if player_tracker is not None:
+                player_tracker.set_nameplate_detector(ocr)
             adapters.append(ocr)
             metadata["ocr_available"] = True
+            metadata["username_follow"] = "nameplate_ocr"
         else:
             metadata["ocr_available"] = False
+            metadata["username_follow"] = "unavailable"
 
     templates = TemplateVision(capture, Path(template_root) / str(game_id))
     adapters.append(templates)
