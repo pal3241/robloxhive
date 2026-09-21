@@ -28,6 +28,7 @@ class AgentDecision:
     done: bool = False
     remember: list[dict[str, Any]] = field(default_factory=list)
     interpretation: dict[str, Any] = field(default_factory=dict)
+    working_memory: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -70,6 +71,12 @@ JSON schema:
     "teams": {},
     "enemies": [],
     "allies": []
+  },
+  "working_memory": {
+    "subgoal": "current immediate objective",
+    "hypothesis": "what you currently think is happening",
+    "blocked_by": "current blocker or empty",
+    "next_check": "what evidence should be checked next"
   },
   "remember": [
     {
@@ -179,6 +186,7 @@ JSON schema:
         memories: list[dict[str, Any]],
         map_summary: dict[str, Any],
         recent_actions: list[dict[str, Any]],
+        working_memory: dict[str, Any] | None = None,
         screenshot_base64: str | None = None,
     ) -> AgentDecision:
         skill_set = sorted(set(skills))
@@ -193,6 +201,7 @@ JSON schema:
             "relevant_memory": memories[: self.config.max_context_memories],
             "semantic_map": map_summary,
             "recent_actions": recent_actions[-8:],
+            "working_memory": working_memory or {},
         }
 
         content = json.dumps(user_payload, ensure_ascii=False)
@@ -238,6 +247,9 @@ JSON schema:
         interpretation = parsed.get("interpretation")
         if not isinstance(interpretation, dict):
             interpretation = {}
+        working = parsed.get("working_memory")
+        if not isinstance(working, dict):
+            working = {}
         try:
             confidence = max(0.0, min(float(parsed.get("confidence", 0.0)), 1.0))
         except (TypeError, ValueError):
@@ -251,5 +263,6 @@ JSON schema:
             done=bool(parsed.get("done", False)),
             remember=[item for item in remember if isinstance(item, dict)][:12],
             interpretation=interpretation,
+            working_memory=working,
             raw=parsed,
         )
