@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Callable
 
 from robloxhive.body.perception import Detection
@@ -23,6 +24,9 @@ class Track:
     detection: Detection
     age: int = 1
     misses: int = 0
+    last_time: float = 0.0
+    velocity_x: float = 0.0
+    velocity_y: float = 0.0
 
 
 class DetectionTracker:
@@ -37,6 +41,7 @@ class DetectionTracker:
 
     def update(self) -> list[Detection]:
         detections = self.detector()
+        now = time.monotonic()
         unmatched_tracks = set(self._tracks)
         assigned: list[Detection] = []
 
@@ -55,16 +60,26 @@ class DetectionTracker:
             if track_id is None:
                 track_id = self._next_id
                 self._next_id += 1
-                self._tracks[track_id] = Track(track_id, det)
+                self._tracks[track_id] = Track(track_id, det, last_time=now)
             else:
                 track = self._tracks[track_id]
+                dt = max(1e-3, now - track.last_time)
+                vx = (det.center_x - track.detection.center_x) / dt
+                vy = (det.center_y - track.detection.center_y) / dt
+                alpha = 0.40
+                track.velocity_x = track.velocity_x * (1.0 - alpha) + vx * alpha
+                track.velocity_y = track.velocity_y * (1.0 - alpha) + vy * alpha
                 track.detection = det
+                track.last_time = now
                 track.age += 1
                 track.misses = 0
                 unmatched_tracks.discard(track_id)
 
             det.track_id = track_id
-            det.metadata["track_age"] = self._tracks[track_id].age
+            track = self._tracks[track_id]
+            det.metadata["track_age"] = track.age
+            det.metadata["velocity_px_s"] = [round(track.velocity_x, 3), round(track.velocity_y, 3)]
+            det.metadata["speed_px_s"] = round((track.velocity_x ** 2 + track.velocity_y ** 2) ** 0.5, 3)
             assigned.append(det)
 
         for track_id in list(unmatched_tracks):
