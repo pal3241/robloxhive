@@ -1,151 +1,183 @@
 # RobloxHive
 
-Distributed autonomous Roblox agent: **Brain Node** for reasoning/memory and a Windows-only **Body Node** for Roblox control, perception, and realtime navigation.
+Distributed autonomous Roblox agent with a remote-capable Brain Node and a Windows Body Node.
 
-## v0.7.0 — Local Mapping + A* Navigation
+## v0.8.0 — First Game Adapter: Murder Mystery 2
 
-The `navigate` skill now uses a local navigation engine instead of only steering toward the target image.
+The first specialized RobloxHive game adapter is **Murder Mystery 2** (official place ID `142823291`).
 
-```text
-Target detection
-      ↓
-Bot-window capture
-      ↓
-Local obstacle estimation
-      ↓
-Egocentric occupancy grid
-      ↓
-A*
-      ↓
-Local waypoint / next cell
-      ↓
-Move
-      ↓
-Motion verification
-      ↓
-stuck?
-  ├── no → rebuild map + replan
-  └── yes → recovery → replan
-```
-
-The planner remains semantic: the Brain says **navigate to shop**; the Windows Body decides the actual local path.
-
-## Local occupancy grid
-
-The navigator maintains an egocentric grid around the bot.
+The adapter is deliberately kept outside the generic core:
 
 ```text
-? ? ? ? ? ? ? G ? ? ?
-? ? ? ? * * * * ? ? ?
-? ? # # * # # ? ? ? ?
-? ? # * * # ? ? ? ? ?
-? . * * # ? ? ? ? ? ?
-? . * # ? ? ? ? ? ? ?
-? . * . . ? ? ? ? ? ?
-? . B . . ? ? ? ? ? ?
+robloxhive/
+├── brain/
+├── body/
+├── games/
+│   └── murder_mystery_2/
+│       ├── models.py
+│       ├── role_detector.py
+│       ├── scene.py
+│       ├── threat.py
+│       ├── survival.py
+│       ├── combat.py
+│       └── autonomy.py
+└── ...
 ```
 
-Legend:
+That keeps role/combat rules isolated while reusing the universal perception, navigation, planner, memory, and Windows-instance systems.
 
-- `B` — bot
-- `G` — current local goal
-- `*` — A* path
-- `#` — likely obstacle
-- `.` — observed free
-- `?` — unknown
+## MM2 runtime loop
 
-Unknown cells are still traversable but have a higher A* cost, so the bot prefers known-free space without becoming unable to explore.
-
-## Obstacle estimation
-
-`ScreenObstacleEstimator` uses the lower portion of the Roblox frame and divides it into local grid cells.
-
-For each cell it measures:
-
-- edge density
-- local texture/variance
-- perspective-adjusted thresholds
-
-Strong nearby structure is marked blocked. Low-edge regions can be marked free.
-
-This is deliberately lightweight for CPU-only operation. It is a local 2D visual estimate, **not yet monocular SLAM or true Roblox geometry**.
-
-## A* pathfinding
-
-`robloxhive/body/navigation/astar.py` performs A* over:
-
-- forward
-- left/right strafe
-- diagonal forward cells
-- limited backwards movement
-
-Costs favor:
-
-1. observed-free cells
-2. short paths
-3. forward movement
-4. unknown cells only when useful
-
-Blocked cells are never entered.
-
-The occupancy map is rebuilt repeatedly while moving, so dynamic changes cause replanning instead of committing to one stale path.
-
-## Motion / stuck detection
-
-Every navigation movement captures:
+MM2 behavior runs locally on the Windows Body because survival, dodging, aiming, and attack timing need lower latency than an LLM loop.
 
 ```text
-frame BEFORE
+Bot window
    ↓
-movement input
+Fused Perception
    ↓
-frame AFTER
+MM2 Scene Reader
+   ↓
+Role Detector + Threat Model
+   ↓
+SURVIVAL FIRST
+   ↓
+Role Policy
+   ├── Innocent → survive / observe
+   ├── Sheriff  → survive / confirmed shot
+   ├── Hero     → survive / confirmed shot
+   └── Murderer → survive / target / melee or throw
+   ↓
+HWND-scoped input
 ```
 
-The central game view is compared. If the visual change is below the motion threshold, the movement is treated as suspicious/stuck.
+The Brain/Qwen can still decide strategy, but the realtime reflex layer stays local.
 
-Repeated failed displacement triggers the recovery ladder:
+## Role detection
+
+Roles supported:
+
+- `innocent`
+- `sheriff`
+- `hero`
+- `murderer`
+- `unknown`
+
+Role detection first uses OCR from the role reveal. A role must be observed consistently before offensive behavior becomes active.
+
+Once stable, the role is **latched for the round** and is cleared on lobby/round-end detection. This prevents the bot from forgetting its role after the reveal text disappears.
+
+There is also a self-weapon fallback:
+
+- own visible knife → likely Murderer
+- own visible gun → Sheriff/Hero-style gun policy
+
+The dashboard has a manual role override for debugging, but default operation is `AUTO`.
+
+## Always-on survival
+
+Survival is evaluated before offense.
+
+### Innocent / Sheriff / Hero / Unknown
+
+If a high-confidence visible knife holder approaches too closely:
 
 ```text
-1. stop
-2. back
-3. strafe left
-4. strafe right
-5. longer back/side escape
-6. rebuild map
-7. A* replan
-8. return STUCK / PATH_UNREACHABLE if recovery budget is exhausted
+detect murderer
+   ↓
+measure apparent distance
+   ↓
+strafe away
+   ↓
+very close?
+   └── back + jump
 ```
 
-That failure is returned to the Brain rather than looping into a wall forever.
+### Murderer
 
-## Skill integration
+The Murderer also protects itself. A visible gun holder/Sheriff can trigger evasive movement before the next attack decision.
 
-These skills now use the local navigator when approaching a target:
+Survival actions are counted in the MM2 dashboard.
 
-- `navigate`
-- `collect`
-- `interact`
+## Sheriff / Hero combat safety
 
-`follow_player` keeps its faster visual-tracking loop because the target is dynamic and continual.
+Sheriff and Hero are intentionally conservative.
+
+The gun is only fired when:
+
+1. a target has strong Murderer evidence,
+2. Murderer confidence is at least the configured threshold (default 93%),
+3. another visible avatar does not overlap the planned aim point,
+4. the local shot cooldown is ready.
 
 ```text
-collect fuel
-   ↓
-navigator.navigate_to("fuel")
-   ↓
-A* / avoid obstacles
-   ↓
-arrive
-   ↓
-interact
-   ↓
-verify collection
+suspect
+  ↓
+confirmed knife evidence?
+  ↓
+confidence >= 93%?
+  ↓
+crowd clear?
+  ↓
+equip slot 1
+  ↓
+aim upper torso
+  ↓
+left click
 ```
 
-The old visual approach code remains as a fallback when a navigator is not attached, which keeps unit testing and alternate Body implementations simple.
+A low-confidence suspect produces `MURDERER_CONFIDENCE_TOO_LOW`, not a speculative shot.
 
-## Navigation Dashboard
+A crowded aim produces `FRIENDLY_FIRE_RISK`.
+
+## Murderer combat
+
+The Murderer prioritizes a visible gun holder first, then another visible player.
+
+Attack mode is selected by apparent distance:
+
+```text
+target close
+   → equip knife
+   → aim
+   → left click melee
+
+target medium/far
+   → equip knife
+   → aim
+   → right click throw
+
+target too far
+   → approach / steer
+   → re-evaluate next tick
+```
+
+Melee and throwing each have local cooldowns to prevent input spam.
+
+The likely self avatar is filtered so the Murderer does not choose its own third-person avatar as a target.
+
+## Threat model
+
+MM2 threat tracking associates detected weapons with nearby tracked avatars.
+
+Recommended detector labels are included at:
+
+```text
+config/mm2-labels.txt
+```
+
+Contents:
+
+```text
+player
+knife
+gun
+dropped_gun
+dead_player
+```
+
+Held and dropped guns are treated separately. A player standing near a dropped Sheriff gun is **not** automatically marked as Sheriff.
+
+## Dashboard
 
 Dashboard tabs now include:
 
@@ -156,134 +188,118 @@ Belajar
 Agent
 Skills
 Perception
-Navigation   ← v0.7
+Navigation
+MM2        ← v0.8
 Memory
 ```
 
-The Navigation tab exposes:
+The MM2 tab shows:
 
-- local occupancy map
-- current A* path
-- local goal cell
-- replan count
-- stuck-event count
-- recovery count
-- last motion score
-- last result
 - Body online/offline state
+- autonomy enabled/disabled
+- detected role
+- role confidence
+- role override
+- current mode
+- last action / reason
+- confirmed Murderer track and confidence
+- Sheriff/gun-holder track
+- current attack target
+- survival move count
+- Sheriff/Hero shots
+- knife melee count
+- knife throw count
+- visible players / knives / guns / bodies
 
-You can request a **Navigation Probe** without moving the character. It retrieves the current navigator state from the Windows Body.
+Controls:
 
-## Perception stack
+- Enable autonomy
+- Disable autonomy
+- Role override: Auto / Innocent / Sheriff / Hero / Murderer
 
-Navigation builds on the v0.6 fused perception stack:
+## Perception requirement
+
+For full MM2 behavior, the Windows Body needs a detector that can recognize at least:
 
 ```text
-PlayerTracker
-      ↓
-ONNX object detector
-      ↓
-OCR / UI text
-      ↓
-Template fallback
+player
+knife
+gun
 ```
 
-Objects/locations are still found by perception; A* determines how to locally move toward them.
+Useful additional labels:
 
-## Windows Body
-
-Install:
-
-```powershell
-pip install -e ".[windows]"
+```text
+dropped_gun
+dead_player
 ```
 
-Find Roblox windows:
+A compatible ONNX model can be placed at:
+
+```text
+data/models/142823291/
+├── detector.onnx
+└── labels.txt
+```
+
+RobloxHive still keeps OCR and template perception as fallbacks, but multi-player combat works best with an object detector because the scene reader needs several avatars simultaneously.
+
+## pyrobloxbot and window ownership
+
+`pyrobloxbot` remains a Windows dependency and RobloxHive is compatible with its window-targeting model.
+
+However, when the human and the bot are both playing on the same laptop, RobloxHive's realtime MM2 layer defaults to the explicit PID/HWND-scoped Body input abstraction. This avoids intentionally sending global keyboard/mouse actions to whichever window happens to be focused.
+
+The bot window is still selected explicitly with:
 
 ```powershell
 python -m robloxhive body --list-windows
 ```
 
-Start the explicitly selected bot instance:
+then:
 
 ```powershell
 python -m robloxhive body ^
   --brain-url http://192.168.1.50:8765 ^
   --agent-id agent-01 ^
-  --game-id 123456789 ^
-  --pid 24680
-```
-
-Optional detector:
-
-```powershell
-python -m robloxhive body ^
-  --brain-url http://192.168.1.50:8765 ^
-  --agent-id agent-01 ^
-  --game-id 123456789 ^
+  --game-id 142823291 ^
   --pid 24680 ^
-  --model data\models\123456789\detector.onnx ^
-  --labels data\models\123456789\labels.txt
+  --model data\models\142823291\detector.onnx ^
+  --labels config\mm2-labels.txt
 ```
 
-## Brain stays lightweight
+When `--game-id 142823291` is used, the MM2 adapter is attached automatically and autonomy starts enabled.
 
-The Brain still does not need OpenCV, NumPy, ONNX Runtime, or Windows APIs.
+## Universal systems reused by MM2
 
-```text
-Phone / remote Brain
-├── Qwen / Ollama
-├── internet learning
-├── game memory
-├── Goal Manager
-└── high-level Planner
+MM2 uses the existing RobloxHive stack:
 
-Windows Body
-├── Roblox
-├── fused perception
-├── occupancy mapping
-├── A*
-├── stuck/recovery
-└── HWND-scoped control
-```
+- explicit PID/HWND ownership
+- protected human-player window
+- fused ONNX/OCR/template perception
+- player tracking
+- local occupancy map
+- A* navigation
+- stuck/recovery handling
+- per-game memory
+- Brain/Body separation
+- dashboard diagnostics
 
-## Per-game learning and memory
-
-The **Belajar** tab researches tutorials, progression, tips, items, and completion strategies from the internet, then synthesizes:
-
-```text
-data/games/<game_id>/
-├── profile.json
-├── knowledge.json
-└── research/
-    └── research-<timestamp>.json
-```
-
-The Goal Manager and Planner use this knowledge to decide **where and why** to go. The Windows navigator decides **how** to get there locally.
-
-## Safety / failure behavior
-
-- Human Roblox windows can remain `PROTECTED`.
-- Body control is tied to an explicit PID/HWND.
-- Multiple Roblox windows are never auto-guessed.
-- Capture remains scoped to the bot window.
-- Unknown skills fail closed.
-- Navigation has bounded iterations and bounded recovery.
-- `STUCK`, `TARGET_LOST`, `PATH_UNREACHABLE`, and `NAVIGATION_TIMEOUT` are explicit failures.
-- A navigation action is not declared successful until the visual target is close and centered.
+MM2-specific rules do not leak into generic navigation or planning.
 
 ## Current boundary
 
-v0.7.0 is a **local egocentric A* navigator**, not full persistent world-scale SLAM.
+v0.8 provides the **role/survival/combat state machine and execution path**, but real match quality depends heavily on the MM2 detector model.
 
-It can:
+In particular, robust identification of multiple moving avatars, held knives, held guns, and dropped weapons requires representative training images from actual MM2 rounds.
 
-- detect local likely obstacles
-- generate a local grid
-- route around blocked cells
-- continuously replan
-- verify visual movement
-- recover from stuck states
-- expose the map and path in the dashboard
+Future MM2 work can add:
 
-For very large worlds, the next layer should add a persistent **topological/semantic waypoint graph** (Spawn → Station → Shop → Mine, etc.) above this local navigator. That graph can use A* globally while v0.7 handles obstacle avoidance between nearby waypoints.
+- nameplate-to-track association
+- witnessed-kill evidence
+- corpse-event reasoning
+- dropped-gun Hero pickup
+- projectile/throw lead prediction
+- persistent map knowledge per MM2 map
+- learned dodge timing
+- combat outcome verification
