@@ -83,6 +83,26 @@ def _run_body(args: argparse.Namespace) -> None:
     bridge.run_forever()
 
 
+def _run_mm2_train(args: argparse.Namespace) -> None:
+    import json
+    from robloxhive.games.murder_mystery_2.training import train_mm2_detector
+
+    device = args.device
+    if isinstance(device, str) and device.isdigit():
+        device = int(device)
+    result = train_mm2_detector(
+        dataset_yaml=args.dataset,
+        base_model=args.base_model,
+        epochs=args.epochs,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        device=device,
+        output_dir=args.output_dir,
+        model_output_dir=args.model_output_dir,
+    )
+    print(json.dumps(result, indent=2))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="robloxhive")
     sub = parser.add_subparsers(dest="command")
@@ -102,6 +122,16 @@ def main() -> None:
     body.add_argument("--no-ocr", action="store_true", help="disable optional Tesseract OCR")
     body.add_argument("--list-windows", action="store_true")
 
+    train = sub.add_parser("mm2-train", help="train/export the MM2 detector to ONNX")
+    train.add_argument("--dataset", default="data/datasets/mm2/yolo/dataset.yaml")
+    train.add_argument("--base-model", default="yolov8n.pt")
+    train.add_argument("--epochs", type=int, default=50)
+    train.add_argument("--imgsz", type=int, default=640)
+    train.add_argument("--batch", type=int, default=8)
+    train.add_argument("--device", default=None, help="cpu, 0, 1, ...")
+    train.add_argument("--output-dir", default="runs/mm2")
+    train.add_argument("--model-output-dir", default="data/models/142823291")
+
     args = parser.parse_args()
 
     if args.command == "dashboard":
@@ -110,11 +140,15 @@ def main() -> None:
     if args.command == "body":
         _run_body(args)
         return
+    if args.command == "mm2-train":
+        _run_mm2_train(args)
+        return
 
     print(f"RobloxHive {__version__}")
     print("Commands:")
     print("  python -m robloxhive dashboard")
     print("  python -m robloxhive body --list-windows")
+    print("  python -m robloxhive mm2-train")
 
 
 if __name__ == "__main__":
