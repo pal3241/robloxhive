@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import random
 import shutil
@@ -107,6 +108,56 @@ class MM2DatasetRecorder:
             boxes=len(boxes),
             approved_boxes=sum(1 for box in boxes if box["approved"]),
         )
+
+    def get_sample(self, sample_id: str) -> dict[str, Any]:
+        path = self.raw_annotations / f"{sample_id}.json"
+        if not path.exists():
+            raise FileNotFoundError(sample_id)
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def preview_data_url(
+        self,
+        sample_id: str,
+        max_width: int = 960,
+        quality: int = 65,
+    ) -> str:
+        try:
+            import cv2
+        except ImportError as exc:
+            raise RuntimeError("Dataset preview requires opencv-python") from exc
+
+        data = self.get_sample(sample_id)
+        image = cv2.imread(str(data["image"]))
+        if image is None:
+            raise RuntimeError("DATASET_IMAGE_MISSING")
+        h, w = image.shape[:2]
+        if w > max_width:
+            scale = max_width / float(w)
+            image = cv2.resize(image, (max_width, max(1, int(h * scale))))
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            image,
+            [int(cv2.IMWRITE_JPEG_QUALITY), max(35, min(90, quality))],
+        )
+        if not ok:
+            raise RuntimeError("DATASET_PREVIEW_ENCODE_FAILED")
+        return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+    def approve_boxes(
+        self,
+        sample_id: str,
+        indices: list[int] | None = None,
+        approved: bool = True,
+    ) -> dict[str, Any]:
+        data = self.get_sample(sample_id)
+        selected = set(indices) if indices is not None else None
+        for index, box in enumerate(data.get("boxes", [])):
+            if selected is None or index in selected:
+                box["approved"] = approved
+        data["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+        path = self.raw_annotations / f"{sample_id}.json"
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        return data
 
     def list_samples(self, limit: int = 100) -> list[dict[str, Any]]:
         samples: list[dict[str, Any]] = []
