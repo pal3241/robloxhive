@@ -9,7 +9,8 @@ from robloxhive.games.murder_mystery_2.models import MM2SceneSnapshot, PlayerObs
 
 PLAYER_LABELS = {"player", "person", "avatar"}
 KNIFE_LABELS = {"knife", "knife_held", "murderer_knife"}
-GUN_LABELS = {"gun", "revolver", "sheriff_gun", "dropped_gun"}
+GUN_LABELS = {"gun", "revolver", "sheriff_gun"}
+DROPPED_GUN_LABELS = {"dropped_gun", "gun_drop"}
 BODY_LABELS = {"body", "dead_player", "corpse"}
 
 
@@ -93,6 +94,7 @@ class MM2SceneReader:
 
         knives = [d for d in detections if d.label.lower() in KNIFE_LABELS]
         guns = [d for d in detections if d.label.lower() in GUN_LABELS]
+        dropped_guns = [d for d in detections if d.label.lower() in DROPPED_GUN_LABELS]
         bodies = [d for d in detections if d.label.lower() in BODY_LABELS]
 
         for knife in knives:
@@ -112,6 +114,7 @@ class MM2SceneReader:
             players=players,
             knives=knives,
             guns=guns,
+            dropped_guns=dropped_guns,
             bodies=bodies,
             ui_text=self._texts(),
             raw_detections=detections,
