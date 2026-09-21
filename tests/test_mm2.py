@@ -70,8 +70,10 @@ class MM2Tests(unittest.TestCase):
     def test_role_requires_stability(self):
         detector = MM2RoleDetector(stable_frames=2)
         role, confidence, phase = detector.detect(["You are Sheriff"])
-        self.assertEqual(role, MM2Role.SHERIFF)
-        self.assertLess(confidence, 0.9)
+        self.assertEqual(role, MM2Role.UNKNOWN)
+        self.assertEqual(confidence, 0.0)
+        self.assertEqual(detector.candidate_role, MM2Role.SHERIFF)
+        self.assertLess(detector.candidate_confidence, 0.9)
         self.assertEqual(phase, RoundPhase.ROLE_REVEAL)
 
         role, confidence, phase = detector.detect(["You are Sheriff"])
@@ -222,6 +224,28 @@ class MM2Tests(unittest.TestCase):
         self.assertEqual(second["role"], MM2Role.SHERIFF.value)
         self.assertEqual(second["phase"], RoundPhase.ROUND.value)
         self.assertTrue(any(action[0] == "click" for action in inputs.actions))
+
+    def test_visual_role_fallback_does_not_latch_during_round_end(self):
+        inputs = FakeInput()
+        autonomy = MM2Autonomy(FakePerception(), inputs)
+        autonomy.tick_interval_s = 0.0
+        autonomy.survival.evade = lambda *_args, **_kwargs: (False, "SAFE")
+
+        own = player(1, 450, 350, knife=True, self_player=True)
+        scene = MM2SceneSnapshot(
+            (1000, 600),
+            players=[own],
+            ui_text=["Victory!"],
+        )
+        autonomy.scene_reader.observe = lambda: scene
+
+        autonomy.tick()
+        status = autonomy.tick()
+
+        self.assertEqual(status["role"], MM2Role.UNKNOWN.value)
+        self.assertEqual(status["phase"], RoundPhase.ROUND_END.value)
+        self.assertEqual(status["stats"]["knife_swings"], 0)
+        self.assertEqual(status["stats"]["knife_throws"], 0)
 
     def test_scene_preserves_zero_track_id_and_separates_untracked_players(self):
         reader = MM2SceneReader(FakePerception())
