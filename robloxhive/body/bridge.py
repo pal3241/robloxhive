@@ -35,6 +35,7 @@ class BodyBridge:
         self.running = False
         self.armed = False
         self._last_register = 0.0
+        self._last_context_check = 0.0
 
     def _json(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -48,7 +49,42 @@ class BodyBridge:
             raw = response.read().decode("utf-8")
             return json.loads(raw) if raw else None
 
+    def _refresh_game_context(self, force: bool = False) -> None:
+        if os.name != "nt":
+            return
+        now = time.monotonic()
+        if not force and now - self._last_context_check < 2.0:
+            return
+        self._last_context_check = now
+
+        try:
+            from robloxhive.body.game_context import detect_process_game_context
+            pid = int(self.metadata.get("pid") or 0)
+            context = detect_process_game_context(pid)
+        except Exception:
+            context = {}
+
+        if not context:
+            return
+
+        place_id = int(context.get("place_id") or 0)
+        if place_id > 0:
+            self.metadata["place_id"] = place_id
+            self.metadata["game_context_source"] = context.get("source")
+            old_game_id = int(self.metadata.get("game_id") or 0)
+            if place_id != old_game_id and self.executor_factory is not None:
+                try:
+                    self.executor = self.executor_factory(place_id)
+                    self.metadata["game_id"] = place_id
+                except Exception as exc:
+                    self.metadata["game_context_error"] = f"{type(exc).__name__}: {exc}"
+
+        universe_id = int(context.get("universe_id") or 0)
+        if universe_id > 0:
+            self.metadata["universe_id"] = universe_id
+
     def register(self, force: bool = False) -> bool:
+        self._refresh_game_context(force=force)
         now = time.monotonic()
         if not force and now - self._last_register < 5.0:
             return True
@@ -174,6 +210,46 @@ class BodyBridge:
                     pass
                 self.armed = False
                 self.register(force=True)
+            return command
+
+        if command.get("type") == "SET_GAME_CONTEXT":
+            place_id = int(payload.get("place_id") or 0)
+            result: dict[str, Any]
+            if not self.armed:
+                result = {"ok": False, "error": "BODY_NOT_ARMED"}
+            elif place_id <= 0:
+                result = {"ok": False, "error": "INVALID_PLACE_ID"}
+            elif self.executor_factory is None:
+                result = {"ok": False, "error": "GAME_CONTEXT_NOT_SUPPORTED"}
+            else:
+                try:
+                    self.executor = self.executor_factory(place_id)
+                    self.metadata["game_id"] = place_id
+                    self.metadata["place_id"] = place_id
+                    self.metadata["game_context_source"] = "dashboard"
+                    self.register(force=True)
+                    result = {
+                        "ok": True,
+                        "place_id": place_id,
+                        "game_id": place_id,
+                        "adapter": self.executor.describe().get("metadata", {}).get("game", {}).get("adapter"),
+                    }
+                except Exception as exc:
+                    result = {
+                        "ok": False,
+                        "error": type(exc).__name__,
+                        "message": str(exc),
+                        "place_id": place_id,
+                    }
+            self._json(
+                "/api/body/game-context-results",
+                method="POST",
+                payload={
+                    "agent_id": self.agent_id,
+                    "context_id": payload.get("context_id"),
+                    "result": result,
+                },
+            )
             return command
 
         if command.get("type") == "JOIN_GAME":
