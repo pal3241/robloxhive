@@ -158,13 +158,17 @@ The MM2 dashboard now contains:
 - Capture Frame
 - Refresh Samples
 - screenshot preview
-- proposed boxes drawn over the screenshot
+- detector proposals drawn over the screenshot
+- a manual drag-box annotator
+- class selector: player / knife / gun / dropped_gun / dead_player
+- per-box approved/pending state
+- Save Review
 - Approve All Boxes
 - Reject All Boxes
 - Export Approved → YOLO
 - dataset sample/box counters
 
-Preview boxes include their proposal index, class, confidence, and approval state.
+This means the first dataset can be created **without any detector model installed**. Capture a frame, drag boxes around visible objects, assign the class, and save the review. When a model already exists, its detections appear as proposals that can be corrected rather than trusted automatically.
 
 Recommended workflow:
 
@@ -177,9 +181,11 @@ Recommended workflow:
    - dropped gun
    - dead player/body
    - different maps, rooms, distances, lighting, skins and camera angles
-4. Preview every sample.
-5. Approve correct boxes and reject incorrect ones.
-6. Export the reviewed dataset.
+4. Open each sample.
+5. Drag missing boxes manually and select the correct class.
+6. Toggle or reject wrong proposals.
+7. Save the review.
+8. Export the reviewed dataset.
 
 ## YOLO export
 
