@@ -44,6 +44,8 @@ class MM2Autonomy:
         self.state = MM2State(enabled=True)
         self._last_tick = 0.0
         self.tick_interval_s = 0.10
+        self._visual_role_candidate = MM2Role.UNKNOWN
+        self._visual_role_frames = 0
 
     def control(self, payload: dict[str, Any]) -> dict[str, Any]:
         action = str(payload.get("action") or "").lower()
@@ -145,19 +147,49 @@ class MM2Autonomy:
 
         detected_role, role_confidence, phase = self.role_detector.detect(scene.ui_text)
 
-        # Visual self-weapon evidence is a fallback when OCR role text is unavailable.
+        # Visual self-weapon evidence is only a fallback when OCR is not yet
+        # trusted. It must also repeat across frames before it can latch a role.
+        # This keeps one noisy detector frame from enabling offensive behavior.
         own = next((p for p in scene.players if p.is_self), None)
-        if detected_role is MM2Role.UNKNOWN and own is not None:
+        visual_role = MM2Role.UNKNOWN
+        if self.role_detector.current_role is MM2Role.UNKNOWN and own is not None:
             if own.has_knife:
-                detected_role, role_confidence, phase = MM2Role.MURDERER, 0.90, RoundPhase.ROUND
-                self.role_detector.current_role = MM2Role.MURDERER
+                visual_role = MM2Role.MURDERER
             elif own.has_gun:
-                detected_role, role_confidence, phase = MM2Role.SHERIFF, 0.84, RoundPhase.ROUND
-                self.role_detector.current_role = MM2Role.SHERIFF
+                visual_role = MM2Role.SHERIFF
 
-        role = self.state.role_override or detected_role
+        if visual_role is MM2Role.UNKNOWN:
+            self._visual_role_candidate = MM2Role.UNKNOWN
+            self._visual_role_frames = 0
+        elif visual_role is self._visual_role_candidate:
+            self._visual_role_frames += 1
+        else:
+            self._visual_role_candidate = visual_role
+            self._visual_role_frames = 1
+
+        if (
+            self.role_detector.current_role is MM2Role.UNKNOWN
+            and self._visual_role_frames >= self.role_detector.stable_frames
+        ):
+            self.role_detector.current_role = visual_role
+            detected_role = visual_role
+            role_confidence = 0.90 if visual_role is MM2Role.MURDERER else 0.84
+            phase = RoundPhase.ROUND
+
+        # Never use a one-frame OCR candidate as the effective role. Automatic
+        # offense is authorized only by the detector's latched stable role.
+        role = self.state.role_override or self.role_detector.current_role
+        effective_confidence = (
+            1.0
+            if self.state.role_override
+            else (
+                role_confidence
+                if role is not MM2Role.UNKNOWN and detected_role is role
+                else (0.94 if role is not MM2Role.UNKNOWN else 0.0)
+            )
+        )
         self.state.role = role
-        self.state.role_confidence = 1.0 if self.state.role_override else role_confidence
+        self.state.role_confidence = effective_confidence
         self.state.phase = phase
 
         murderer = self.threats.murderer(scene)
@@ -180,6 +212,18 @@ class MM2Autonomy:
                 )
                 self.state.survival_moves += 1
                 return self._finish(scene)
+
+        # Offensive actions require a trusted role *and* an active round.
+        # Manual role override still does not attack in lobby/role-reveal/end.
+        offense_allowed = (
+            role is not MM2Role.UNKNOWN
+            and phase is RoundPhase.ROUND
+        )
+        if role in {MM2Role.SHERIFF, MM2Role.HERO, MM2Role.MURDERER} and not offense_allowed:
+            self.state.mode = "observe"
+            self.state.last_action = "waiting_for_stable_role"
+            self.state.last_reason = "role_or_round_not_stable"
+            return self._finish(scene)
 
         if role in {MM2Role.SHERIFF, MM2Role.HERO}:
             self.state.mode = "sheriff_combat"
@@ -244,6 +288,9 @@ class MM2Autonomy:
             "kill_events_recent": self.kill_reasoner.recent(),
             "threat_evidence_recent": list(self.threats.evidence_log)[-10:],
             "new_kill_events": self._last_kill_events_count,
+            "stable_role": self.role_detector.current_role.value,
+            "visual_role_candidate": self._visual_role_candidate.value,
+            "visual_role_frames": self._visual_role_frames,
         }
         return self.status()
 
