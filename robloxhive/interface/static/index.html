@@ -275,13 +275,27 @@ dead_player</pre>
         <div id="mm2DatasetSamples"><p class="muted">Belum ada sample list.</p></div>
       </div>
       <div class="card">
-        <h2>Sample Review</h2>
+        <h2>Sample Review / Annotator</h2>
         <div id="mm2DatasetReview"><p class="muted">Klik sample untuk preview.</p></div>
-        <img id="mm2DatasetPreview" class="dataset-preview" alt="MM2 dataset preview" style="display:none">
+        <label>Label box baru</label>
+        <select id="mm2BoxLabel">
+          <option value="player">player</option>
+          <option value="knife">knife</option>
+          <option value="gun">gun</option>
+          <option value="dropped_gun">dropped_gun</option>
+          <option value="dead_player">dead_player</option>
+        </select>
+        <canvas id="mm2AnnotatorCanvas" class="dataset-preview" style="display:none;width:100%;height:auto;cursor:crosshair"></canvas>
+        <div id="mm2BoxList" class="meta" style="margin-top:8px"></div>
         <div class="row" style="margin-top:10px">
+          <button id="mm2SaveReview" type="button">Save Review</button>
+          <button id="mm2ClearBoxes" class="secondary" type="button">Clear Boxes</button>
+        </div>
+        <div class="row" style="margin-top:8px">
           <button id="mm2ApproveAll" type="button">Approve All Boxes</button>
           <button id="mm2RejectAll" class="secondary" type="button">Reject All Boxes</button>
         </div>
+        <div class="meta">Drag pada gambar untuk membuat bounding box manual. Klik box di daftar untuk toggle approved/pending.</div>
       </div>
     </div>
   </section>
@@ -575,6 +589,9 @@ $('#mm2ApplyRole').onclick=()=>{
 
 
 let mm2CurrentDatasetSample=null;
+let mm2WorkingBoxes=[];
+let mm2CanvasImage=null;
+let mm2DragStart=null;
 async function mm2DatasetAction(action,extra={}){
   const agent=$('#mm2Agent').value;
   if(!agent){$('#mm2DatasetMessage').textContent='Pilih Windows Body MM2 dulu.';return null}
@@ -609,9 +626,9 @@ async function loadMM2DatasetControls(){
     if(previewResult){
       const sample=previewResult.result.sample||{};
       mm2CurrentDatasetSample=sample.id||mm2CurrentDatasetSample;
-      const img=$('#mm2DatasetPreview');img.src=previewResult.result.preview;img.style.display='block';
-      const boxes=sample.boxes||[];
-      $('#mm2DatasetReview').innerHTML='<b>'+esc(sample.id||'sample')+'</b><div class="meta">'+boxes.map((b,i)=>'#'+i+' '+b.label+' '+Math.round((b.confidence||0)*100)+'% '+(b.approved?'APPROVED':'pending')).join(' · ')+'</div>';
+      mm2WorkingBoxes=(sample.boxes||[]).map(b=>({...b}));
+      $('#mm2DatasetReview').innerHTML='<b>'+esc(sample.id||'sample')+'</b><div class="meta">'+esc(sample.width||0)+'×'+esc(sample.height||0)+' · '+mm2WorkingBoxes.length+' boxes</div>';
+      loadMM2Annotator(previewResult.result.raw_preview||previewResult.result.preview,sample);
     }
     const exportResult=complete.find(x=>x.action==='dataset_export'&&x.result?.export);
     if(exportResult){
@@ -620,6 +637,93 @@ async function loadMM2DatasetControls(){
     }
   }catch(e){$('#mm2DatasetMessage').textContent=e.message}
 }
+
+function renderMM2BoxList(){
+  const root=$('#mm2BoxList');
+  root.innerHTML='';
+  if(!mm2WorkingBoxes.length){root.textContent='Belum ada box.';return}
+  mm2WorkingBoxes.forEach((b,i)=>{
+    const row=document.createElement('div');
+    row.className='item';
+    row.innerHTML='<b>#'+i+' '+esc(b.label)+'</b> <span class="pill '+(b.approved?'ok':'warn')+'">'+(b.approved?'APPROVED':'pending')+'</span><div class="meta">x '+Math.round(b.x)+' · y '+Math.round(b.y)+' · w '+Math.round(b.width)+' · h '+Math.round(b.height)+'</div>';
+    row.onclick=()=>{mm2WorkingBoxes[i].approved=!mm2WorkingBoxes[i].approved;drawMM2Annotator();renderMM2BoxList()};
+    root.appendChild(row);
+  });
+}
+function drawMM2Annotator(tempBox=null){
+  const canvas=$('#mm2AnnotatorCanvas');
+  if(!mm2CanvasImage||!canvas.width||!canvas.height)return;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(mm2CanvasImage,0,0,canvas.width,canvas.height);
+  const drawBox=(b,index,temp=false)=>{
+    ctx.lineWidth=Math.max(2,canvas.width/600);
+    ctx.strokeStyle=temp?'#ffffff':(b.approved?'#22c55e':'#f59e0b');
+    ctx.fillStyle=ctx.strokeStyle;
+    ctx.strokeRect(b.x,b.y,b.width,b.height);
+    ctx.font=Math.max(13,canvas.width/90)+'px sans-serif';
+    ctx.fillText((temp?'new':('#'+index+' '+b.label)),b.x+3,Math.max(15,b.y-4));
+  };
+  mm2WorkingBoxes.forEach((b,i)=>drawBox(b,i,false));
+  if(tempBox)drawBox(tempBox,-1,true);
+}
+function loadMM2Annotator(dataUrl,sample){
+  const canvas=$('#mm2AnnotatorCanvas');
+  const image=new Image();
+  image.onload=()=>{
+    mm2CanvasImage=image;
+    canvas.width=Number(sample.width)||image.naturalWidth;
+    canvas.height=Number(sample.height)||image.naturalHeight;
+    canvas.style.display='block';
+    drawMM2Annotator();
+    renderMM2BoxList();
+  };
+  image.src=dataUrl;
+}
+function mm2CanvasPoint(event){
+  const canvas=$('#mm2AnnotatorCanvas');
+  const rect=canvas.getBoundingClientRect();
+  return {
+    x:(event.clientX-rect.left)*canvas.width/rect.width,
+    y:(event.clientY-rect.top)*canvas.height/rect.height
+  };
+}
+$('#mm2AnnotatorCanvas').addEventListener('mousedown',e=>{
+  if(!mm2CurrentDatasetSample)return;
+  mm2DragStart=mm2CanvasPoint(e);
+});
+$('#mm2AnnotatorCanvas').addEventListener('mousemove',e=>{
+  if(!mm2DragStart)return;
+  const p=mm2CanvasPoint(e);
+  const box={x:Math.min(mm2DragStart.x,p.x),y:Math.min(mm2DragStart.y,p.y),width:Math.abs(p.x-mm2DragStart.x),height:Math.abs(p.y-mm2DragStart.y),label:$('#mm2BoxLabel').value,approved:true};
+  drawMM2Annotator(box);
+});
+$('#mm2AnnotatorCanvas').addEventListener('mouseup',e=>{
+  if(!mm2DragStart)return;
+  const p=mm2CanvasPoint(e);
+  const box={
+    label:$('#mm2BoxLabel').value,
+    x:Math.min(mm2DragStart.x,p.x),
+    y:Math.min(mm2DragStart.y,p.y),
+    width:Math.abs(p.x-mm2DragStart.x),
+    height:Math.abs(p.y-mm2DragStart.y),
+    confidence:1,
+    source:'manual',
+    approved:true
+  };
+  mm2DragStart=null;
+  if(box.width>=5&&box.height>=5)mm2WorkingBoxes.push(box);
+  drawMM2Annotator();
+  renderMM2BoxList();
+});
+$('#mm2AnnotatorCanvas').addEventListener('mouseleave',()=>{if(mm2DragStart){mm2DragStart=null;drawMM2Annotator()}});
+$('#mm2ClearBoxes').onclick=()=>{mm2WorkingBoxes=[];drawMM2Annotator();renderMM2BoxList()};
+$('#mm2SaveReview').onclick=async()=>{
+  if(!mm2CurrentDatasetSample){$('#mm2DatasetMessage').textContent='Pilih sample dulu.';return}
+  await mm2DatasetAction('review',{sample_id:mm2CurrentDatasetSample,boxes:mm2WorkingBoxes,note:$('#mm2DatasetNote').value.trim()||null});
+  setTimeout(async()=>{await mm2DatasetAction('preview',{sample_id:mm2CurrentDatasetSample});setTimeout(loadMM2DatasetControls,350)},350);
+};
+
 $('#mm2DatasetCapture').onclick=async()=>{
   await mm2DatasetAction('capture',{note:$('#mm2DatasetNote').value.trim()||null});
   setTimeout(async()=>{await mm2DatasetAction('list');setTimeout(loadMM2DatasetControls,350)},350);
