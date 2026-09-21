@@ -48,6 +48,34 @@ class PerceptionTests(unittest.TestCase):
         self.assertEqual(first.track_id, second.track_id)
         self.assertEqual(second.metadata["track_age"], 2)
 
+    def test_player_tracker_matches_requested_username_with_nameplate_ocr(self):
+        def detector():
+            return [
+                Detection("player", 0.9, 20, 100, 80, 160, source="onnx"),
+                Detection("player", 0.9, 220, 100, 80, 160, source="onnx"),
+            ]
+
+        class FakeOCR:
+            def scan(self):
+                return [
+                    Detection("Alice_123", 0.95, 230, 70, 70, 24, source="ocr")
+                ]
+
+        player = PlayerTracker(DetectionTracker(detector), nameplate_detector=FakeOCR())
+        hit = player.find("player:Alice_123")
+
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.track_id, 2)
+        self.assertTrue(hit.metadata["username_verified"])
+        self.assertEqual(hit.metadata["tracking_mode"], "username_nameplate_ocr")
+
+    def test_player_tracker_never_falls_back_to_random_avatar_for_username(self):
+        def detector():
+            return [Detection("player", 0.9, 20, 100, 80, 160, source="onnx")]
+
+        player = PlayerTracker(DetectionTracker(detector), nameplate_detector=None)
+        self.assertIsNone(player.find("player:MissingUser"))
+
     def test_player_tracker_only_handles_player_route(self):
         def detector():
             return [Detection("player", 0.8, 10, 20, 50, 100, source="onnx")]
