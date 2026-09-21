@@ -38,6 +38,7 @@
     <button class="tab" data-tab="skills">Skills</button>
     <button class="tab" data-tab="perception">Perception</button>
     <button class="tab" data-tab="navigation">Navigation</button>
+    <button class="tab" data-tab="mm2">MM2</button>
     <button class="tab" data-tab="memory">Memory</button>
   </nav>
 
@@ -206,6 +207,59 @@
     </div>
   </section>
 
+
+  <section id="mm2" class="view">
+    <div class="grid">
+      <div class="card">
+        <div class="row"><div><h2>Murder Mystery 2</h2><div class="muted">Autonomy lokal: role detection → survival → role policy → combat/evade.</div></div><button id="refreshMM2" class="secondary" type="button">Refresh</button></div>
+        <div id="mm2Nodes"><p class="muted">Belum ada Body MM2 terhubung.</p></div>
+      </div>
+      <form id="mm2ControlForm" class="card">
+        <h2>MM2 Controls</h2>
+        <label>Body</label><select id="mm2Agent"><option value="">Pilih Body...</option></select>
+        <label>Autonomy</label>
+        <div class="row">
+          <button id="mm2Enable" type="button">Enable</button>
+          <button id="mm2Disable" class="secondary" type="button">Disable</button>
+        </div>
+        <label>Role override (debug only)</label>
+        <select id="mm2Role">
+          <option value="auto">AUTO</option>
+          <option value="innocent">Innocent</option>
+          <option value="sheriff">Sheriff</option>
+          <option value="hero">Hero</option>
+          <option value="murderer">Murderer</option>
+        </select>
+        <button id="mm2ApplyRole" type="button">Apply Role Override</button>
+        <p id="mm2Message" class="muted"></p>
+        <div class="meta">AUTO membutuhkan role yang stabil sebelum behavior ofensif aktif.</div>
+      </form>
+      <div class="card">
+        <h2>Role Policies</h2>
+        <div class="item"><b>Innocent</b><div class="meta">Survive, jaga jarak dari confirmed knife holder, terus observasi.</div></div>
+        <div class="item"><b>Sheriff / Hero</b><div class="meta">Survive lebih dulu; hanya menembak bila murderer confidence tinggi dan tidak ada friendly-fire overlap.</div></div>
+        <div class="item"><b>Murderer</b><div class="meta">Prioritaskan gun holder, melee saat dekat, knife throw saat jarak menengah, approach saat terlalu jauh.</div></div>
+        <div class="item"><b>Unknown</b><div class="meta">Tidak menyerang. Jika murderer terlihat, survival tetap boleh menghindar.</div></div>
+      </div>
+      <div class="card">
+        <h2>Combat Safety</h2>
+        <div class="item"><b>Sheriff trigger discipline</b><div class="meta">Minimum murderer confidence 93% sebelum fire.</div></div>
+        <div class="item"><b>Crowd check</b><div class="meta">Tahan tembakan bila avatar lain overlap dengan aim point.</div></div>
+        <div class="item"><b>Cooldown</b><div class="meta">Gun/throw/melee punya local cooldown supaya input tidak spam.</div></div>
+        <div class="item"><b>Survival priority</b><div class="meta">Ancaman dekat diproses sebelum offense pada role non-Murderer.</div></div>
+      </div>
+      <div class="card">
+        <h2>Detector Labels MM2</h2>
+        <pre>player
+knife
+gun
+dropped_gun
+dead_player</pre>
+        <div class="meta">Model ONNX MM2 sebaiknya punya label player + weapon agar threat/role targeting penuh bekerja.</div>
+      </div>
+    </div>
+  </section>
+
   <section id="memory" class="view">
     <div class="memory-layout">
       <div class="card"><h2>Game Memory</h2><div id="games"></div></div>
@@ -222,7 +276,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(b.dataset.tab==='navigation'){loadNavigationNodes();loadNavigationProbes()}}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(b.dataset.tab==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(b.dataset.tab==='mm2')loadMM2()}));
 async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
 async function loadInstances(){const root=$('#instanceList');root.innerHTML='<p class="muted">Scanning…</p>';try{const items=await api('/api/instances');root.innerHTML=items.length?'':'<p class="muted">Tidak ada Roblox window terdeteksi.</p>';items.forEach(i=>{const div=document.createElement('div');div.className='item';div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN BOT-01</button></div>';div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot','agent-01');root.appendChild(div)})}catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 async function setRole(pid,role,agent_id=null){await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});loadInstances()}
@@ -445,7 +499,53 @@ async function loadNavigationProbes(){
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 }
 
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}},2000);
+
+function mm2StateHtml(row){
+  const s=row.state||{}, st=s.stats||{}, d=s.diagnostics||{};
+  const roleConf=Math.round((s.role_confidence||0)*100);
+  const murdConf=Math.round((s.murderer_confidence||0)*100);
+  return '<b>'+esc(row.agent_id)+'</b> <span class="pill '+(row.online?'ok':'bad')+'">'+(row.online?'online':'offline')+'</span> <span class="pill">'+esc(s.enabled?'AUTONOMY ON':'AUTONOMY OFF')+'</span>'+
+    '<div class="item"><b>Role</b><div class="meta">'+esc(s.role||'unknown')+' · '+roleConf+'%'+(s.role_override?' · override '+esc(s.role_override):'')+'</div></div>'+
+    '<div class="item"><b>Mode</b><div class="meta">'+esc(s.mode||'-')+' · '+esc(s.last_action||'-')+(s.last_reason?' · '+esc(s.last_reason):'')+'</div></div>'+
+    '<div class="item"><b>Murderer</b><div class="meta">track '+esc(s.murderer_track_id??'-')+' · confidence '+murdConf+'%</div></div>'+
+    '<div class="item"><b>Target</b><div class="meta">track '+esc(s.target_track_id??'-')+' · sheriff track '+esc(s.sheriff_track_id??'-')+'</div></div>'+
+    '<div class="item"><b>Stats</b><div class="meta">ticks '+esc(st.ticks||0)+' · evade '+esc(st.survival_moves||0)+' · shots '+esc(st.shots||0)+' · melee '+esc(st.knife_swings||0)+' · throws '+esc(st.knife_throws||0)+'</div></div>'+
+    '<div class="item"><b>Scene</b><div class="meta">players '+esc(d.players_visible||0)+' · knives '+esc(d.knives_visible||0)+' · guns '+esc(d.guns_visible||0)+' · bodies '+esc(d.bodies_visible||0)+'</div></div>';
+}
+async function loadMM2(){
+  const root=$('#mm2Nodes'), select=$('#mm2Agent');
+  try{
+    const rows=await api('/api/games/mm2/status');
+    root.innerHTML=rows.length?'':'<p class="muted">Belum ada Windows Body dengan adapter Murder Mystery 2.</p>';
+    const current=select.value;
+    select.innerHTML='<option value="">Pilih Body...</option>';
+    rows.forEach(row=>{
+      const div=document.createElement('div');div.className='item';
+      div.innerHTML=mm2StateHtml(row);root.appendChild(div);
+      if(row.online){const o=document.createElement('option');o.value=row.agent_id;o.textContent=row.agent_id+' · '+(row.state?.role||'unknown');select.appendChild(o)}
+    });
+    if([...select.options].some(o=>o.value===current))select.value=current;
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+async function mm2Control(action,role=null){
+  const agent=$('#mm2Agent').value;
+  if(!agent){$('#mm2Message').textContent='Pilih Windows Body dulu.';return}
+  try{
+    const r=await api('/api/games/mm2/control',{method:'POST',body:JSON.stringify({agent_id:agent,action,role})});
+    $('#mm2Message').textContent='Control '+r.control_id+' queued.';
+    setTimeout(loadMM2,500);
+  }catch(e){$('#mm2Message').textContent=e.message}
+}
+$('#refreshMM2').onclick=loadMM2;
+$('#mm2Enable').onclick=()=>mm2Control('enable');
+$('#mm2Disable').onclick=()=>mm2Control('disable');
+$('#mm2ApplyRole').onclick=()=>{
+  const role=$('#mm2Role').value;
+  if(role==='auto')mm2Control('clear_role');
+  else mm2Control('role_override',role);
+};
+
+health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(active==='mm2')loadMM2()},2000);
 </script>
 </body>
 </html>
