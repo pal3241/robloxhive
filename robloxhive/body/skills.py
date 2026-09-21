@@ -19,6 +19,7 @@ class SkillExecutor:
         self.navigation: Any | None = None
         self.game_adapter: Any | None = None
         self.input_backend: Any | None = None
+        self.background_input_backend: Any | None = None
 
     def register(self, name: str, handler: SkillHandler) -> None:
         self._handlers[name] = handler
@@ -58,26 +59,38 @@ class SkillExecutor:
     def attach_game_adapter(self, adapter: Any) -> None:
         self.game_adapter = adapter
 
-    def attach_input(self, input_backend: Any) -> None:
+    def attach_input(self, input_backend: Any, background_input_backend: Any | None = None) -> None:
         self.input_backend = input_backend
+        self.background_input_backend = background_input_backend
 
     def direct_control(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.input_backend is None:
+        requested_mode = str(payload.get("mode") or "background").lower()
+        backend = (
+            self.background_input_backend
+            if requested_mode == "background" and self.background_input_backend is not None
+            else self.input_backend
+        )
+        if backend is None:
             return {"ok": False, "error": "INPUT_NOT_ATTACHED"}
         action = str(payload.get("action") or "").lower()
         seconds = max(0.01, min(float(payload.get("seconds") or 0.15), 3.0))
         try:
             if action in {"forward", "back", "left", "right"}:
-                self.input_backend.move(action, seconds)
+                backend.move(action, seconds)
             elif action == "jump":
-                self.input_backend.key("jump", min(seconds, 0.25))
+                backend.key("jump", min(seconds, 0.25))
             elif action == "interact":
-                self.input_backend.interact()
+                backend.interact()
             elif action == "release":
-                self.input_backend.release_all()
+                backend.release_all()
             else:
                 return {"ok": False, "error": "UNSUPPORTED_DIRECT_ACTION", "action": action}
-            return {"ok": True, "action": action, "seconds": seconds}
+            return {
+                "ok": True,
+                "action": action,
+                "seconds": seconds,
+                "mode": getattr(backend, "mode", requested_mode),
+            }
         except Exception as exc:
             return {"ok": False, "error": type(exc).__name__, "message": str(exc), "action": action}
 
@@ -167,6 +180,12 @@ class SkillExecutor:
                     "attached": self.input_backend is not None,
                     "backend": type(self.input_backend).__name__ if self.input_backend is not None else None,
                     "mode": getattr(self.input_backend, "mode", None) if self.input_backend is not None else None,
+                    "background_available": self.background_input_backend is not None,
+                    "background_backend": (
+                        type(self.background_input_backend).__name__
+                        if self.background_input_backend is not None
+                        else None
+                    ),
                 },
             },
         }
