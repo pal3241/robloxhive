@@ -41,7 +41,12 @@ class CompositePerception:
             name = type(adapter).__name__
             self.last_attempts.append(name)
             try:
-                hit = adapter.find(label)
+                if player_target and name == "UiTextDetector":
+                    username = label.split(":", 1)[1].strip() if ":" in label else ""
+                    exact = getattr(adapter, "find_exact", None)
+                    hit = exact(username) if username and callable(exact) else None
+                else:
+                    hit = adapter.find(label)
             except Exception:
                 continue
             if hit is None:
@@ -49,8 +54,9 @@ class CompositePerception:
 
             hits.append(hit)
 
-            # PlayerTracker is the dedicated route for follow_player.
-            if player_target and hit.source == "player_tracker":
+            # PlayerTracker is preferred for follow_player. Exact OCR nameplate
+            # is a safe fallback when a game-specific player detector is absent.
+            if player_target and hit.source in {"player_tracker", "ocr"}:
                 self.last_source = hit.source
                 return hit
 
