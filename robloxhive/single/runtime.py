@@ -72,6 +72,7 @@ class SingleBotRuntime:
         self._last_tick = 0.0
         self._knowledge_mtime: dict[int, float] = {}
         self._last_game_context_check = 0.0
+        self._manual_game_context = False
         self._last_scene_signature: str | None = None
         self._last_scene_change_at = time.monotonic()
 
@@ -148,8 +149,10 @@ class SingleBotRuntime:
         else:
             self.paused_reason = None
 
-    def set_game_id(self, game_id: int) -> None:
+    def set_game_id(self, game_id: int, *, source: str = "manual") -> None:
         game_id = int(game_id or 0)
+        if source == "manual":
+            self._manual_game_context = game_id > 0
         if game_id == self.game_id:
             return
         self.semantic_map.save()
@@ -282,7 +285,7 @@ class SingleBotRuntime:
         )
 
     def _refresh_game_context(self) -> None:
-        if self.game_context_provider is None:
+        if self.game_context_provider is None or self._manual_game_context:
             return
         now = time.monotonic()
         if now - self._last_game_context_check < 3.0:
@@ -294,7 +297,7 @@ class SingleBotRuntime:
         except Exception:
             return
         if place_id > 0 and place_id != self.game_id:
-            self.set_game_id(place_id)
+            self.set_game_id(place_id, source="detected")
 
     def _remember_interpretation(self, interpretation: dict[str, Any]) -> None:
         roles = interpretation.get("roles")
