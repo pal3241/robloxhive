@@ -57,6 +57,21 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(command.type, "EXECUTE_SKILL")
             self.assertEqual(command.payload["plan_id"], plan.id)
 
+    def test_goal_routes_every_step_to_selected_agent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = AgentRuntime(self._memory(tmp))
+            plan = runtime.start_goal(
+                77,
+                Goal(
+                    type="complete_game",
+                    metadata={"instruction": "finish the game", "agent_id": "agent-02"},
+                ),
+            )
+            command = runtime.next_command(timeout=0.1, agent_id="agent-02")
+            self.assertIsNotNone(command)
+            self.assertEqual(command.payload["agent_id"], "agent-02")
+            self.assertEqual(command.payload["plan_id"], plan.id)
+
     def test_success_advances_and_verifies_knowledge(self):
         with tempfile.TemporaryDirectory() as tmp:
             memory = self._memory(tmp)
