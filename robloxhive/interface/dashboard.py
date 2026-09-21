@@ -59,6 +59,18 @@ class JoinGameResult(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+class DirectControlRequest(BaseModel):
+    agent_id: str = "agent-01"
+    action: Literal["forward", "back", "left", "right", "jump", "interact", "release"]
+    seconds: float = Field(default=0.15, ge=0.01, le=3.0)
+
+
+class DirectControlResult(BaseModel):
+    agent_id: str
+    control_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 class BodyResultRequest(BaseModel):
     agent_id: str = "agent-01"
     plan_id: str
@@ -131,7 +143,7 @@ class MM2DatasetRequest(BaseModel):
 
 
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.9.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="1.0.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     runtime = AgentRuntime(memory)
@@ -142,6 +154,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     navigation_probes: dict[str, dict[str, Any]] = {}
     game_controls: dict[str, dict[str, Any]] = {}
     join_requests: dict[str, dict[str, Any]] = {}
+    direct_controls: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
 
     def body_snapshot() -> list[dict[str, Any]]:
@@ -207,7 +220,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         online_bodies = sum(1 for body in body_snapshot() if body["online"])
         return {
             "ok": True,
-            "version": "0.9.0",
+            "version": "1.0.0",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
             "active_plan": active.id if active else None,
             "online_bodies": online_bodies,
@@ -351,6 +364,55 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                 result=request.result, finished_at=time.time(),
             )
             return join_requests[request.join_id]
+        return {"status": "orphan_result", "result": request.result}
+
+    @app.post("/api/body/control")
+    def direct_control(request: DirectControlRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+        control_id = uuid4().hex[:12]
+        direct_controls[control_id] = {
+            "control_id": control_id,
+            "agent_id": request.agent_id,
+            "action": request.action,
+            "seconds": request.seconds,
+            "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(Command(
+            source="dashboard",
+            type="DIRECT_INPUT",
+            payload={
+                "control_id": control_id,
+                "agent_id": request.agent_id,
+                "action": request.action,
+                "seconds": request.seconds,
+            },
+        ))
+        return direct_controls[control_id]
+
+    @app.get("/api/body/controls")
+    def get_direct_controls() -> list[dict[str, Any]]:
+        return sorted(
+            direct_controls.values(),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )[:30]
+
+    @app.post("/api/body/control-results")
+    def direct_control_result(request: DirectControlResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+            node["last_control"] = request.result
+        if request.control_id and request.control_id in direct_controls:
+            direct_controls[request.control_id].update(
+                status="complete" if request.result.get("ok") else "failed",
+                result=request.result,
+                finished_at=time.time(),
+            )
+            return direct_controls[request.control_id]
         return {"status": "orphan_result", "result": request.result}
 
     @app.post("/api/body/skills/test")
@@ -631,7 +693,10 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         node = body_nodes.get(agent_id)
         if node:
             node["last_seen"] = time.time()
-        command = runtime.next_command(timeout=max(0.0, min(timeout, 5.0)))
+        command = runtime.next_command(
+            timeout=max(0.0, min(timeout, 5.0)),
+            agent_id=agent_id,
+        )
         if command is None:
             return None
         return {
