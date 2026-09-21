@@ -461,6 +461,12 @@ class SingleBotRuntime:
         self.world.apply_interpretation(decision.interpretation)
         self._remember_interpretation(decision.interpretation)
         self._remember_llm_items(decision.remember)
+        if decision.action == "follow_player" and self.goal.get("type") == "follow_player":
+            username = str(self.goal.get("target") or "").strip()
+            if username:
+                decision.payload["target"] = username
+                decision.payload["username"] = username
+
         self.last_decision = {
             "action": decision.action,
             "payload": decision.payload,
