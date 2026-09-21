@@ -24,6 +24,7 @@ class MM2SceneReader:
         self._player_tracker = None
         self._detector = None
         self._ocr = None
+        self._next_synthetic_track_id = -1
         for adapter in getattr(perception, "adapters", []):
             name = type(adapter).__name__
             if name == "PlayerTracker":
@@ -72,12 +73,13 @@ class MM2SceneReader:
         frame_size = self.perception.frame_size()
         players: list[PlayerObservation] = []
 
-        synthetic_track_id = -1
         for d in detections:
             if d.label.lower() in PLAYER_LABELS:
                 if d.track_id is None:
-                    track_id = synthetic_track_id
-                    synthetic_track_id -= 1
+                    # Untracked detections get one-shot IDs that are never reused.
+                    # This prevents accidental cross-player evidence carry-over.
+                    track_id = self._next_synthetic_track_id
+                    self._next_synthetic_track_id -= 1
                 else:
                     # Preserve valid falsy IDs such as 0. Only None means
                     # "untracked".
