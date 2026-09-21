@@ -51,9 +51,34 @@
   </section>
 
   <section id="instances" class="view">
-    <div class="card">
-      <div class="row"><div><h2>Roblox Instances</h2><div class="muted">Pilih mana milikmu dan mana milik bot.</div></div><button id="scan" class="secondary">Scan ulang</button></div>
-      <div id="instanceList"></div>
+    <div class="grid">
+      <div class="card">
+        <div class="row"><div><h2>Roblox Instances</h2><div class="muted">Window berasal dari Windows Body, bukan dari HP Brain.</div></div><button id="scan" class="secondary">Scan ulang</button></div>
+        <div id="instanceList"></div>
+      </div>
+      <div class="card">
+        <h2>Game Session</h2>
+        <label>Windows Body</label>
+        <select id="sessionAgent"><option value="">Pilih Body...</option></select>
+        <label>Roblox Place ID</label>
+        <input id="joinPlaceId" type="number" min="1" placeholder="Contoh: 142823291">
+        <button id="joinGame" type="button">Join Game</button>
+        <p id="joinMessage" class="muted">Body dapat berpindah game tanpa restart RobloxHive.</p>
+        <div id="joinHistory"></div>
+        <h3>Remote Control Test</h3>
+        <div class="row"><button class="secondary direct-control" data-action="forward">W</button></div>
+        <div class="row">
+          <button class="secondary direct-control" data-action="left">A</button>
+          <button class="secondary direct-control" data-action="back">S</button>
+          <button class="secondary direct-control" data-action="right">D</button>
+        </div>
+        <div class="row">
+          <button class="secondary direct-control" data-action="jump">Jump</button>
+          <button class="secondary direct-control" data-action="interact">Interact (E)</button>
+          <button class="secondary direct-control" data-action="release">Release Keys</button>
+        </div>
+        <p id="controlMessage" class="muted">Gunakan ini untuk memastikan Body benar-benar dapat mengontrol window bot.</p>
+      </div>
     </div>
   </section>
 
@@ -318,9 +343,78 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(b.dataset.tab==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(b.dataset.tab==='mm2'){loadMM2();loadMM2DatasetControls()}}));
 async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
-async function loadInstances(){const root=$('#instanceList');root.innerHTML='<p class="muted">Scanning…</p>';try{const items=await api('/api/instances');root.innerHTML=items.length?'':'<p class="muted">Tidak ada Roblox window terdeteksi.</p>';items.forEach(i=>{const div=document.createElement('div');div.className='item';div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN BOT-01</button></div>';div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot','agent-01');root.appendChild(div)})}catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
-async function setRole(pid,role,agent_id=null){await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});loadInstances()}
+async function loadSessionBodies(){
+  const select=$('#sessionAgent'), current=select.value;
+  try{
+    const nodes=await api('/api/body/nodes');
+    select.innerHTML='<option value="">Pilih Body...</option>';
+    nodes.filter(n=>n.online).forEach(n=>{
+      const o=document.createElement('option');
+      o.value=n.agent_id;
+      const m=n.metadata||{};
+      o.textContent=n.agent_id+' · PID '+(m.pid??'-')+' · game '+(m.game_id??0)+' · '+((m.input||{}).mode||m.input_mode||'input');
+      select.appendChild(o);
+    });
+    if([...select.options].some(o=>o.value===current))select.value=current;
+    else if(select.options.length===2)select.selectedIndex=1;
+  }catch{}
+}
+async function loadJoinHistory(){
+  try{
+    const rows=await api('/api/body/joins');
+    const root=$('#joinHistory');
+    root.innerHTML='';
+    rows.slice(0,5).forEach(j=>{
+      const d=document.createElement('div');d.className='item';
+      d.innerHTML='<b>Place '+esc(j.place_id)+'</b> <span class="pill">'+esc(j.status)+'</span><div class="meta">'+esc(j.agent_id)+(j.result?.error?' · '+esc(j.result.error):'')+'</div>';
+      root.appendChild(d);
+    });
+  }catch{}
+}
+async function loadInstances(){
+  const root=$('#instanceList');
+  root.innerHTML='<p class="muted">Scanning…</p>';
+  await loadSessionBodies();
+  try{
+    const items=await api('/api/instances');
+    root.innerHTML=items.length?'':'<p class="muted">Belum ada window. Pastikan Windows Body online dan tunggu heartbeat berikutnya.</p>';
+    items.forEach(i=>{
+      const div=document.createElement('div');div.className='item';
+      div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+(i.agent_id?' · '+esc(i.agent_id):'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN SELECTED BOT</button></div>';
+      div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');
+      div.querySelector('[data-bot]').onclick=()=>{
+        const agent=$('#sessionAgent').value||'agent-01';
+        setRole(i.pid,'bot',agent);
+      };
+      root.appendChild(div);
+    });
+    loadJoinHistory();
+  }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
+}
+async function setRole(pid,role,agent_id=null){
+  await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});
+  loadInstances();
+}
 $('#scan').onclick=loadInstances;
+$('#joinGame').onclick=async()=>{
+  const agent=$('#sessionAgent').value, placeId=Number($('#joinPlaceId').value);
+  if(!agent){$('#joinMessage').textContent='Pilih Windows Body.';return}
+  if(!placeId){$('#joinMessage').textContent='Masukkan Place ID.';return}
+  try{
+    const r=await api('/api/body/join',{method:'POST',body:JSON.stringify({agent_id:agent,place_id:placeId})});
+    $('#joinMessage').textContent='Join '+r.join_id+' dikirim ke '+agent+'.';
+    setTimeout(()=>{loadJoinHistory();loadSessionBodies()},500);
+  }catch(e){$('#joinMessage').textContent=e.message}
+};
+async function sendDirectControl(action){
+  const agent=$('#sessionAgent').value;
+  if(!agent){$('#controlMessage').textContent='Pilih Windows Body.';return}
+  try{
+    const r=await api('/api/body/control',{method:'POST',body:JSON.stringify({agent_id:agent,action,seconds:0.18})});
+    $('#controlMessage').textContent='Control '+action+' queued: '+r.control_id;
+  }catch(e){$('#controlMessage').textContent=e.message}
+}
+document.querySelectorAll('.direct-control').forEach(b=>b.onclick=()=>sendDirectControl(b.dataset.action));
 $('#learnForm').addEventListener('submit',async e=>{e.preventDefault();$('#learnMessage').textContent='Membuat learning job…';try{const d=await api('/api/learn',{method:'POST',body:JSON.stringify({game_id:Number($('#gameId').value),game_name:$('#gameName').value,objective:$('#objective').value})});$('#learnMessage').textContent='Job '+d.id+' dimulai. Research → synthesis → game memory.';loadJobs()}catch(err){$('#learnMessage').textContent=err.message}});
 async function loadJobs(){try{const jobs=await api('/api/learn/jobs');$('#jobs').innerHTML=jobs.length?'':'<p class="muted">Belum ada job.</p>';jobs.forEach(j=>{const p=Math.max(0,Math.min(100,Math.round((j.completed/Math.max(1,j.total))*100)));const div=document.createElement('div');div.className='item';const conf=j.status==='complete'?' · confidence '+Math.round((j.knowledge_confidence||0)*100)+'%':'';div.innerHTML='<b>'+esc(j.game_name)+'</b> <span class="pill">'+esc(j.status)+'</span><div class="muted">'+esc(j.stage)+' · '+p+'% · '+esc(j.synthesizer||'')+conf+'</div><div class="progress"><div style="width:'+p+'%"></div></div>'+(j.error?'<div class="bad">'+esc(j.error)+'</div>':'');$('#jobs').appendChild(div)})}catch(e){$('#jobs').innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 const labels={objectives:'Objectives',progression:'Progression',mechanics:'Mechanics',items:'Items / Upgrades',enemies:'Enemies',locations:'Locations',strategies:'Strategies / Tips',common_mistakes:'Common Mistakes',endgame:'Endgame / Win Conditions',unknowns:'Unknowns',conflicts:'Source Conflicts'};
@@ -741,7 +835,7 @@ $('#mm2RejectAll').onclick=async()=>{
   setTimeout(async()=>{await mm2DatasetAction('preview',{sample_id:mm2CurrentDatasetSample});setTimeout(loadMM2DatasetControls,350)},350);
 };
 
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(active==='mm2'){loadMM2();loadMM2DatasetControls()}},2000);
+health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='instances')loadInstances();if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(active==='mm2'){loadMM2();loadMM2DatasetControls()}},2000);
 </script>
 </body>
 </html>
