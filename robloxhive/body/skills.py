@@ -17,6 +17,7 @@ class SkillExecutor:
         self.metadata: dict[str, Any] = {}
         self.perception: Any | None = None
         self.navigation: Any | None = None
+        self.game_adapter: Any | None = None
 
     def register(self, name: str, handler: SkillHandler) -> None:
         self._handlers[name] = handler
@@ -52,6 +53,37 @@ class SkillExecutor:
 
     def attach_navigation(self, navigation: Any) -> None:
         self.navigation = navigation
+
+    def attach_game_adapter(self, adapter: Any) -> None:
+        self.game_adapter = adapter
+
+    def autonomy_tick(self) -> dict[str, Any]:
+        if self.game_adapter is None:
+            return {"adapter": None, "enabled": False}
+        try:
+            return self.game_adapter.tick()
+        except Exception as exc:
+            return {
+                "adapter": type(self.game_adapter).__name__,
+                "enabled": True,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    def game_status(self) -> dict[str, Any]:
+        if self.game_adapter is None:
+            return {"adapter": None, "enabled": False}
+        try:
+            return self.game_adapter.status()
+        except Exception as exc:
+            return {"adapter": type(self.game_adapter).__name__, "error": type(exc).__name__}
+
+    def game_control(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.game_adapter is None:
+            return {"ok": False, "error": "NO_GAME_ADAPTER"}
+        control = getattr(self.game_adapter, "control", None)
+        if not callable(control):
+            return {"ok": False, "error": "GAME_ADAPTER_NOT_CONTROLLABLE"}
+        return control(payload)
 
     def navigation_probe(self) -> dict[str, Any]:
         if self.navigation is None:
@@ -106,5 +138,6 @@ class SkillExecutor:
                 **self.metadata,
                 "perception": self._perception_diagnostics(),
                 "navigation": self.navigation_probe(),
+                "game": self.game_status(),
             },
         }
