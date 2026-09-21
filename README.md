@@ -2,261 +2,267 @@
 
 Distributed autonomous Roblox agent with a remote-capable Brain Node and a Windows Body Node.
 
-## v0.8.0 — First Game Adapter: Murder Mystery 2
+## v0.9.0 — MM2 Dataset, Witnessed-Kill Reasoning, and Predictive Aim
 
-The first specialized RobloxHive game adapter is **Murder Mystery 2** (official place ID `142823291`).
+Murder Mystery 2 is the first specialized RobloxHive game adapter. v0.9 adds the training loop required to build a dedicated visual detector and improves combat reasoning for moving targets.
 
-The adapter is deliberately kept outside the generic core:
+## MM2 realtime loop
 
 ```text
-robloxhive/
-├── brain/
-├── body/
-├── games/
-│   └── murder_mystery_2/
-│       ├── models.py
-│       ├── role_detector.py
-│       ├── scene.py
-│       ├── threat.py
-│       ├── survival.py
-│       ├── combat.py
-│       └── autonomy.py
-└── ...
+Roblox bot HWND
+      ↓
+Fused perception
+      ↓
+Tracking + screen velocity
+      ↓
+MM2 Scene Reader
+      ↓
+Role Detector
+      ↓
+Threat Model
+      ├── visible knife/gun evidence
+      └── witnessed-kill evidence
+      ↓
+SURVIVAL FIRST
+      ↓
+Role Policy
+ ┌────────────┼─────────────┐
+ ▼            ▼             ▼
+Innocent   Sheriff/Hero   Murderer
+survive    lead + fire    melee/lead throw
 ```
 
-That keeps role/combat rules isolated while reusing the universal perception, navigation, planner, memory, and Windows-instance systems.
+The realtime MM2 reflex loop stays on the Windows Body. The Brain/Qwen can remain on another device.
 
-## MM2 runtime loop
+## Predictive aim
 
-MM2 behavior runs locally on the Windows Body because survival, dodging, aiming, and attack timing need lower latency than an LLM loop.
+Tracked detections now maintain an exponentially smoothed screen-space velocity:
+
+```text
+velocity_px_s = [vx, vy]
+speed_px_s
+track_age
+```
+
+Sheriff/Hero gun aim and Murderer knife throws use a bounded lead point:
+
+```text
+predicted_x = current_x + vx × lead_time
+predicted_y = current_y + vy × lead_time
+```
+
+Lead is clamped so a noisy tracker cannot aim far outside the target region.
+
+Default behavior:
+
+- Sheriff lead horizon: 0.08 s
+- Knife throw lead horizon: 0.20 s
+- Maximum screen lead: 140 px
+
+Close-range knife melee still aims directly at the current upper-torso position.
+
+## Witnessed-kill reasoning
+
+Visible knife ownership remains the strongest Murderer signal, but v0.9 can also use new corpse events as supporting evidence.
+
+```text
+previous frame: no corpse
+current frame : new dead_player detection
+             ↓
+find nearby tracked players
+             ↓
+knife holder nearby?
+     ├── yes → very strong Murderer evidence
+     └── no  → only reinforce an already suspicious player
+```
+
+Proximity alone never turns an innocent player into a confirmed Murderer.
+
+The first corpse snapshot after Body startup is treated as a baseline so joining mid-round does not create fake witnessed-kill events.
+
+Recent kill events and threat evidence are visible in MM2 diagnostics.
+
+## MM2 dataset pipeline
+
+v0.9 adds a full dataset workflow.
 
 ```text
 Bot window
    ↓
-Fused Perception
+Capture Frame
    ↓
-MM2 Scene Reader
+data/datasets/mm2/raw
    ↓
-Role Detector + Threat Model
+detector proposals
    ↓
-SURVIVAL FIRST
+human review
    ↓
-Role Policy
-   ├── Innocent → survive / observe
-   ├── Sheriff  → survive / confirmed shot
-   ├── Hero     → survive / confirmed shot
-   └── Murderer → survive / target / melee or throw
+APPROVED boxes only
    ↓
-HWND-scoped input
+YOLO train/val export
+   ↓
+Ultralytics fine-tune
+   ↓
+ONNX export
+   ↓
+data/models/142823291/detector.onnx
 ```
 
-The Brain/Qwen can still decide strategy, but the realtime reflex layer stays local.
+### Dataset classes
 
-## Role detection
-
-Roles supported:
-
-- `innocent`
-- `sheriff`
-- `hero`
-- `murderer`
-- `unknown`
-
-Role detection first uses OCR from the role reveal. A role must be observed consistently before offensive behavior becomes active.
-
-Once stable, the role is **latched for the round** and is cleared on lobby/round-end detection. This prevents the bot from forgetting its role after the reveal text disappears.
-
-There is also a self-weapon fallback:
-
-- own visible knife → likely Murderer
-- own visible gun → Sheriff/Hero-style gun policy
-
-The dashboard has a manual role override for debugging, but default operation is `AUTO`.
-
-## Always-on survival
-
-Survival is evaluated before offense.
-
-### Innocent / Sheriff / Hero / Unknown
-
-If a high-confidence visible knife holder approaches too closely:
+Default MM2 classes:
 
 ```text
-detect murderer
-   ↓
-measure apparent distance
-   ↓
-strafe away
-   ↓
-very close?
-   └── back + jump
+player
+knife
+gun
+dropped_gun
+dead_player
 ```
 
-### Murderer
-
-The Murderer also protects itself. A visible gun holder/Sheriff can trigger evasive movement before the next attack decision.
-
-Survival actions are counted in the MM2 dashboard.
-
-## Sheriff / Hero combat safety
-
-Sheriff and Hero are intentionally conservative.
-
-The gun is only fired when:
-
-1. a target has strong Murderer evidence,
-2. Murderer confidence is at least the configured threshold (default 93%),
-3. another visible avatar does not overlap the planned aim point,
-4. the local shot cooldown is ready.
-
-```text
-suspect
-  ↓
-confirmed knife evidence?
-  ↓
-confidence >= 93%?
-  ↓
-crowd clear?
-  ↓
-equip slot 1
-  ↓
-aim upper torso
-  ↓
-left click
-```
-
-A low-confidence suspect produces `MURDERER_CONFIDENCE_TOO_LOW`, not a speculative shot.
-
-A crowded aim produces `FRIENDLY_FIRE_RISK`.
-
-## Murderer combat
-
-The Murderer prioritizes a visible gun holder first, then another visible player.
-
-Attack mode is selected by apparent distance:
-
-```text
-target close
-   → equip knife
-   → aim
-   → left click melee
-
-target medium/far
-   → equip knife
-   → aim
-   → right click throw
-
-target too far
-   → approach / steer
-   → re-evaluate next tick
-```
-
-Melee and throwing each have local cooldowns to prevent input spam.
-
-The likely self avatar is filtered so the Murderer does not choose its own third-person avatar as a target.
-
-## Threat model
-
-MM2 threat tracking associates detected weapons with nearby tracked avatars.
-
-Recommended detector labels are included at:
+The label template is also stored at:
 
 ```text
 config/mm2-labels.txt
 ```
 
-Contents:
+## Dataset storage
+
+Raw captures:
 
 ```text
-player
-knife
-gun
-dropped_gun
-dead_player
+data/datasets/mm2/
+└── raw/
+    ├── images/
+    │   └── <sample-id>.png
+    └── annotations/
+        └── <sample-id>.json
 ```
 
-Held and dropped guns are treated separately. A player standing near a dropped Sheriff gun is **not** automatically marked as Sheriff.
+Each annotation contains:
 
-## Dashboard
+- image dimensions
+- class
+- bounding box
+- detector confidence
+- detection source
+- approved/rejected state
+- optional note
 
-Dashboard tabs now include:
+Detector proposals are **not** automatically trusted as training ground truth. Only approved boxes are exported.
+
+## MM2 Dashboard dataset workflow
+
+The MM2 dashboard now contains:
+
+- Capture Frame
+- Refresh Samples
+- screenshot preview
+- proposed boxes drawn over the screenshot
+- Approve All Boxes
+- Reject All Boxes
+- Export Approved → YOLO
+- dataset sample/box counters
+
+Preview boxes include their proposal index, class, confidence, and approval state.
+
+Recommended workflow:
+
+1. Join MM2 with the selected bot window.
+2. Open the **MM2** dashboard tab.
+3. Capture representative situations:
+   - several avatar appearances
+   - knife equipped
+   - gun equipped
+   - dropped gun
+   - dead player/body
+   - different maps, rooms, distances, lighting, skins and camera angles
+4. Preview every sample.
+5. Approve correct boxes and reject incorrect ones.
+6. Export the reviewed dataset.
+
+## YOLO export
+
+Approved samples are exported to:
 
 ```text
-Overview
-Instances
-Belajar
-Agent
-Skills
-Perception
-Navigation
-MM2        ← v0.8
-Memory
+data/datasets/mm2/yolo/
+├── dataset.yaml
+├── images/
+│   ├── train/
+│   └── val/
+└── labels/
+    ├── train/
+    └── val/
 ```
 
-The MM2 tab shows:
+Unknown/unapproved boxes are excluded.
 
-- Body online/offline state
-- autonomy enabled/disabled
-- detected role
-- role confidence
-- role override
-- current mode
-- last action / reason
-- confirmed Murderer track and confidence
-- Sheriff/gun-holder track
-- current attack target
-- survival move count
-- Sheriff/Hero shots
-- knife melee count
-- knife throw count
-- visible players / knives / guns / bodies
+The export uses a deterministic train/validation split.
 
-Controls:
+## Training the MM2 detector
 
-- Enable autonomy
-- Disable autonomy
-- Role override: Auto / Innocent / Sheriff / Hero / Murderer
+Install training dependencies:
 
-## Perception requirement
+```powershell
+pip install -e ".[training]"
+```
 
-For full MM2 behavior, the Windows Body needs a detector that can recognize at least:
+Then train:
+
+```powershell
+python -m robloxhive mm2-train
+```
+
+Defaults:
 
 ```text
-player
-knife
-gun
+dataset    data/datasets/mm2/yolo/dataset.yaml
+base model yolov8n.pt
+epochs     50
+imgsz      640
+batch      8
+output     runs/mm2
 ```
 
-Useful additional labels:
+Custom example:
 
-```text
-dropped_gun
-dead_player
+```powershell
+python -m robloxhive mm2-train ^
+  --dataset data\datasets\mm2\yolo\dataset.yaml ^
+  --base-model yolov8n.pt ^
+  --epochs 80 ^
+  --imgsz 640 ^
+  --batch 8 ^
+  --device cpu
 ```
 
-A compatible ONNX model can be placed at:
+The best checkpoint is exported to raw-output ONNX without embedded NMS so RobloxHive's lightweight ONNX Runtime parser can consume it.
+
+Final runtime files:
 
 ```text
 data/models/142823291/
 ├── detector.onnx
-└── labels.txt
+├── labels.txt
+└── training.json
 ```
 
-RobloxHive still keeps OCR and template perception as fallbacks, but multi-player combat works best with an object detector because the scene reader needs several avatars simultaneously.
+## Running the MM2 Body
 
-## pyrobloxbot and window ownership
+Install Windows runtime dependencies:
 
-`pyrobloxbot` remains a Windows dependency and RobloxHive is compatible with its window-targeting model.
+```powershell
+pip install -e ".[windows]"
+```
 
-However, when the human and the bot are both playing on the same laptop, RobloxHive's realtime MM2 layer defaults to the explicit PID/HWND-scoped Body input abstraction. This avoids intentionally sending global keyboard/mouse actions to whichever window happens to be focused.
-
-The bot window is still selected explicitly with:
+Find Roblox windows:
 
 ```powershell
 python -m robloxhive body --list-windows
 ```
 
-then:
+Start the bot instance explicitly:
 
 ```powershell
 python -m robloxhive body ^
@@ -265,41 +271,75 @@ python -m robloxhive body ^
   --game-id 142823291 ^
   --pid 24680 ^
   --model data\models\142823291\detector.onnx ^
-  --labels config\mm2-labels.txt
+  --labels data\models\142823291\labels.txt
 ```
 
-When `--game-id 142823291` is used, the MM2 adapter is attached automatically and autonomy starts enabled.
+When game ID `142823291` is selected, the MM2 adapter attaches automatically.
 
-## Universal systems reused by MM2
+## Role behavior
 
-MM2 uses the existing RobloxHive stack:
+### Innocent
 
-- explicit PID/HWND ownership
-- protected human-player window
-- fused ONNX/OCR/template perception
-- player tracking
-- local occupancy map
-- A* navigation
-- stuck/recovery handling
-- per-game memory
-- Brain/Body separation
-- dashboard diagnostics
+- always-on survival
+- evade confirmed knife holder
+- continue observing and building threat evidence
+- never attack from an unknown role
 
-MM2-specific rules do not leak into generic navigation or planning.
+### Sheriff / Hero
+
+- survival is evaluated first
+- only fire at high-confidence Murderer
+- default fire threshold: 93%
+- do not fire when another avatar overlaps the predicted aim point
+- use tracked velocity to lead moving targets
+- gun cooldown prevents input spam
+
+### Murderer
+
+- survival can evade a visible gun holder
+- prioritize visible gun holder
+- close target → melee knife
+- medium/far target → predictive knife throw
+- too-far target → approach and re-evaluate
+- self avatar is excluded from targets
+
+## Role safety
+
+Role OCR must stabilize before offensive behavior starts.
+
+Once stable, the role is latched until lobby/round-end detection. If OCR is unavailable, the bot's own visible weapon can provide a fallback role hint.
+
+Manual dashboard role override is available for debugging only.
+
+## Architecture
+
+```text
+Phone / remote Brain
+├── Internet learning
+├── Qwen / Ollama
+├── per-game memory
+├── Goal Manager
+└── Planner
+          │
+          │ LAN API
+          ▼
+Windows Body
+├── explicit PID/HWND
+├── Roblox capture
+├── ONNX detector
+├── OCR
+├── player tracking
+├── velocity estimation
+├── local occupancy map + A*
+├── MM2 role detector
+├── witnessed-kill reasoner
+├── survival
+├── predictive combat
+└── dataset recorder
+```
 
 ## Current boundary
 
-v0.8 provides the **role/survival/combat state machine and execution path**, but real match quality depends heavily on the MM2 detector model.
+The code now contains the full MM2 collection/training/export/runtime pipeline, but the repository does **not** contain a trained MM2 detector yet because no reviewed MM2 screenshots have been supplied.
 
-In particular, robust identification of multiple moving avatars, held knives, held guns, and dropped weapons requires representative training images from actual MM2 rounds.
-
-Future MM2 work can add:
-
-- nameplate-to-track association
-- witnessed-kill evidence
-- corpse-event reasoning
-- dropped-gun Hero pickup
-- projectile/throw lead prediction
-- persistent map knowledge per MM2 map
-- learned dodge timing
-- combat outcome verification
+The next practical step is to collect and review real MM2 frames. Once enough varied examples exist, `mm2-train` can create the first dedicated ONNX model and the runtime can begin real-match detector tuning.
