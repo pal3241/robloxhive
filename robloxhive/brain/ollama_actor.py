@@ -34,6 +34,20 @@ class AgentDecision:
 class OllamaActor:
     """Ollama is the scenario-level actor, not merely a text summarizer."""
 
+    SKILL_GUIDE = {
+        "observe": "No input. Re-read current scene before deciding.",
+        "wait": "payload: {seconds}; wait for loading/cooldown/state change.",
+        "navigate": "payload: {target}; approach a visible/object detector target.",
+        "collect": "payload: {target, key?}; approach and collect, then verify visual change.",
+        "interact": "payload: {target?, key?}; approach target if supplied and interact.",
+        "follow_player": "payload: {target:<exact Roblox username>}; exact username only.",
+        "click_ui": "payload: {text, button?}; find visible OCR UI text and click it.",
+        "press_key": "payload: {key, seconds?}; press a game/UI key.",
+        "explore": "payload: {pattern?, seconds?}; move to gather new map information.",
+        "aim": "payload: {target or username, lead_seconds?}; predictive aim at a visible target.",
+        "combat": "payload: {target or username, weapon_key?, button?}; aim then attack visible target.",
+    }
+
     SYSTEM = """You are the high-level brain of ONE Roblox automation bot.
 You do not emit keyboard scan codes. Choose one semantic action that best fits the CURRENT scene.
 Never assume an action succeeded: use the next observation and action result.
@@ -167,9 +181,14 @@ JSON schema:
         recent_actions: list[dict[str, Any]],
         screenshot_base64: str | None = None,
     ) -> AgentDecision:
+        skill_set = sorted(set(skills))
         user_payload = {
             "goal": goal,
-            "available_skills": sorted(set(skills)),
+            "available_skills": skill_set,
+            "skill_contracts": {
+                skill: self.SKILL_GUIDE.get(skill, "Use only when its target and success condition are observable.")
+                for skill in skill_set
+            },
             "world": world,
             "relevant_memory": memories[: self.config.max_context_memories],
             "semantic_map": map_summary,
