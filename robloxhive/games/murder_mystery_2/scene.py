@@ -72,11 +72,19 @@ class MM2SceneReader:
         frame_size = self.perception.frame_size()
         players: list[PlayerObservation] = []
 
+        synthetic_track_id = -1
         for d in detections:
             if d.label.lower() in PLAYER_LABELS:
+                if d.track_id is None:
+                    track_id = synthetic_track_id
+                    synthetic_track_id -= 1
+                else:
+                    # Preserve valid falsy IDs such as 0. Only None means
+                    # "untracked".
+                    track_id = int(d.track_id)
                 players.append(
                     PlayerObservation(
-                        track_id=int(d.track_id or -1),
+                        track_id=track_id,
                         detection=d,
                     )
                 )
