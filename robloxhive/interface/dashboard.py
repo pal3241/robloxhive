@@ -94,8 +94,20 @@ class NavigationProbeResult(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+class GameControlRequest(BaseModel):
+    agent_id: str = "agent-01"
+    action: Literal["enable", "disable", "role_override", "clear_role"]
+    role: Literal["auto", "innocent", "sheriff", "hero", "murderer"] | None = None
+
+
+class GameControlResult(BaseModel):
+    agent_id: str
+    control_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.7.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="0.8.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     runtime = AgentRuntime(memory)
@@ -104,6 +116,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     manual_tests: dict[str, dict[str, Any]] = {}
     perception_probes: dict[str, dict[str, Any]] = {}
     navigation_probes: dict[str, dict[str, Any]] = {}
+    game_controls: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
 
     def body_snapshot() -> list[dict[str, Any]]:
@@ -155,7 +168,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         online_bodies = sum(1 for body in body_snapshot() if body["online"])
         return {
             "ok": True,
-            "version": "0.7.0",
+            "version": "0.8.0",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
             "active_plan": active.id if active else None,
             "online_bodies": online_bodies,
@@ -412,6 +425,77 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                 finished_at=time.time(),
             )
             return navigation_probes[request.probe_id]
+        return {
+            "status": "orphan_result",
+            "agent_id": request.agent_id,
+            "result": request.result,
+        }
+
+    @app.get("/api/games/mm2/status")
+    def mm2_status() -> list[dict[str, Any]]:
+        rows = []
+        for node in body_snapshot():
+            game = node.get("metadata", {}).get("game", {})
+            if game.get("adapter") == "murder_mystery_2":
+                rows.append({
+                    "agent_id": node.get("agent_id"),
+                    "online": node.get("online", False),
+                    "pid": node.get("metadata", {}).get("pid"),
+                    "hwnd": node.get("metadata", {}).get("hwnd"),
+                    "game_id": node.get("metadata", {}).get("game_id"),
+                    "state": game,
+                })
+        return rows
+
+    @app.post("/api/games/mm2/control")
+    def mm2_control(request: GameControlRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+        game = node.get("metadata", {}).get("game", {})
+        if game.get("adapter") != "murder_mystery_2":
+            raise HTTPException(status_code=409, detail="Selected Body is not running the MM2 adapter")
+
+        control_id = uuid4().hex[:12]
+        payload = {
+            "control_id": control_id,
+            "agent_id": request.agent_id,
+            "action": request.action,
+        }
+        if request.role is not None:
+            payload["role"] = request.role
+
+        game_controls[control_id] = {
+            "control_id": control_id,
+            "agent_id": request.agent_id,
+            "action": request.action,
+            "role": request.role,
+            "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(Command(source="dashboard", type="GAME_CONTROL", payload=payload))
+        return game_controls[control_id]
+
+    @app.get("/api/games/mm2/controls")
+    def mm2_controls() -> list[dict[str, Any]]:
+        return sorted(
+            game_controls.values(),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )[:30]
+
+    @app.post("/api/body/game-control-results")
+    def game_control_result(request: GameControlResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+        if request.control_id and request.control_id in game_controls:
+            game_controls[request.control_id].update(
+                status="complete",
+                result=request.result,
+                finished_at=time.time(),
+            )
+            return game_controls[request.control_id]
         return {
             "status": "orphan_result",
             "agent_id": request.agent_id,
