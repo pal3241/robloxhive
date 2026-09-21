@@ -835,16 +835,39 @@ function mm2StateHtml(row){
 async function loadMM2(){
   const root=$('#mm2Nodes'), select=$('#mm2Agent');
   try{
-    const rows=await api('/api/games/mm2/status');
-    root.innerHTML=rows.length?'':'<p class="muted">Belum ada Windows Body dengan adapter Murder Mystery 2.</p>';
-    const current=select.value;
-    select.innerHTML='<option value="">Pilih Body...</option>';
-    rows.forEach(row=>{
-      const div=document.createElement('div');div.className='item';
-      div.innerHTML=mm2StateHtml(row);root.appendChild(div);
-      if(row.online){const o=document.createElement('option');o.value=row.agent_id;o.textContent=row.agent_id+' · '+(row.state?.role||'unknown');select.appendChild(o)}
-    });
-    if([...select.options].some(o=>o.value===current))select.value=current;
+    const [rows,nodes]=await Promise.all([api('/api/games/mm2/status'),getBodies()]);
+    const signature=JSON.stringify(rows.map(r=>[r.agent_id,r.online,r.adapter_ready,r.game_id,r.state]));
+    if(root.dataset.signature!==signature){
+      root.dataset.signature=signature;
+      root.innerHTML=rows.length?'':'<p class="muted">Belum ada Body yang memakai context MM2. Pilih Body lalu Attach Selected Body to MM2.</p>';
+      rows.forEach(row=>{
+        const div=document.createElement('div');div.className='item';
+        div.innerHTML=mm2StateHtml(row)+
+          (!row.adapter_ready?'<div class="warn meta">MM2 context terdeteksi, adapter sedang belum siap.</div>':'');
+        root.appendChild(div);
+      });
+    }
+
+    const byAgent=new Map(rows.map(r=>[r.agent_id,r]));
+    syncSelect(
+      select,
+      nodes.filter(n=>n.online).map(n=>{
+        const row=byAgent.get(n.agent_id);
+        const game=bodyGameId(n);
+        return {
+          value:n.agent_id,
+          label:n.agent_id+' · '+(row?.adapter_ready?'MM2 READY':('game '+(game||'unknown')))
+        };
+      }),
+      'Pilih Body...'
+    );
+
+    const currentRow=byAgent.get(select.value);
+    if(select.value&&!currentRow){
+      $('#mm2Message').textContent='Body dipilih, tetapi belum memakai MM2 context. Klik Attach Selected Body to MM2.';
+    }else if(currentRow&&!currentRow.adapter_ready){
+      $('#mm2Message').textContent='MM2 context ada, menunggu adapter Body aktif.';
+    }
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 }
 async function mm2Control(action,role=null){
@@ -857,6 +880,16 @@ async function mm2Control(action,role=null){
   }catch(e){$('#mm2Message').textContent=e.message}
 }
 $('#refreshMM2').onclick=loadMM2;
+$('#mm2Attach').onclick=async()=>{
+  const agent=$('#mm2Agent').value;
+  if(!agent){$('#mm2Message').textContent='Pilih Windows Body dulu.';return}
+  try{
+    const r=await api('/api/body/game-context',{method:'POST',body:JSON.stringify({agent_id:agent,place_id:142823291})});
+    $('#mm2Message').textContent='MM2 context queued: '+r.context_id;
+    liveState.lastSnapshot=0;
+    setTimeout(loadMM2,600);
+  }catch(e){$('#mm2Message').textContent=e.message}
+};
 $('#mm2Enable').onclick=()=>mm2Control('enable');
 $('#mm2Disable').onclick=()=>mm2Control('disable');
 $('#mm2ApplyRole').onclick=()=>{
