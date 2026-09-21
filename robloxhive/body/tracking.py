@@ -103,11 +103,84 @@ class PlayerTracker:
         self,
         detection_tracker: DetectionTracker,
         player_labels: tuple[str, ...] = ("player", "person", "avatar"),
+        nameplate_detector: object | None = None,
     ) -> None:
         self.tracker = detection_tracker
         self.player_labels = tuple(x.lower() for x in player_labels)
+        self.nameplate_detector = nameplate_detector
         self._selected_track: int | None = None
+        self._selected_by_username: dict[str, int] = {}
         self._shape = (0, 0)
+
+    def set_nameplate_detector(self, detector: object | None) -> None:
+        self.nameplate_detector = detector
+
+    @staticmethod
+    def _normalize_username(value: str) -> str:
+        return "".join(ch for ch in value.strip().lower() if ch.isalnum() or ch == "_")
+
+    def _match_username(self, players: list[Detection], username: str) -> Detection | None:
+        detector = self.nameplate_detector
+        scan = getattr(detector, "scan", None)
+        if not callable(scan):
+            return None
+
+        wanted = self._normalize_username(username)
+        if not wanted:
+            return None
+
+        try:
+            texts = list(scan())
+        except Exception:
+            return None
+
+        labels = []
+        for text in texts:
+            raw = str(getattr(text, "label", "") or "")
+            normalized = self._normalize_username(raw.lstrip("@"))
+            if normalized == wanted:
+                labels.append(text)
+
+        if not labels:
+            return None
+
+        cached_id = self._selected_by_username.get(wanted)
+        cached = next((p for p in players if p.track_id == cached_id), None)
+        if cached is not None:
+            return cached
+
+        best: tuple[float, Detection] | None = None
+        for nameplate in labels:
+            nx = nameplate.center_x
+            ny = nameplate.center_y
+            for player in players:
+                # Roblox nameplates normally sit above/inside the upper portion
+                # of an avatar. Reject remote text to avoid following a random
+                # player when chat/UI contains the username.
+                px = player.center_x
+                top = player.y
+                horizontal = abs(nx - px)
+                vertical = abs(ny - top)
+                if horizontal > max(80.0, player.width * 0.9):
+                    continue
+                if ny > player.y + player.height * 0.45:
+                    continue
+                if vertical > max(120.0, player.height * 0.9):
+                    continue
+                score = horizontal + vertical * 0.6
+                if best is None or score < best[0]:
+                    best = (score, player)
+
+        if best is None:
+            return None
+
+        selected = best[1]
+        if selected.track_id is not None:
+            self._selected_by_username[wanted] = selected.track_id
+        selected.metadata["requested_player"] = username
+        selected.metadata["username_verified"] = True
+        selected.metadata["tracking_mode"] = "username_nameplate_ocr"
+        return selected
 
     def frame_size(self) -> tuple[int, int]:
         detector_obj = getattr(self.tracker.detector, "__self__", None)
@@ -127,12 +200,27 @@ class PlayerTracker:
         if not players:
             return None
 
-        selected = next((d for d in players if d.track_id == self._selected_track), None)
-        if selected is None:
-            selected = max(players, key=lambda d: (int(d.metadata.get("track_age", 1)), d.confidence, d.area))
-            self._selected_track = selected.track_id
+        username = requested.split(":", 1)[1].strip() if ":" in requested else ""
+        if username:
+            selected = self._match_username(players, username)
+            if selected is None:
+                # Username-specific follow must never silently degrade into
+                # following an arbitrary avatar.
+                return None
+        else:
+            selected = next((d for d in players if d.track_id == self._selected_track), None)
+            if selected is None:
+                selected = max(
+                    players,
+                    key=lambda d: (
+                        int(d.metadata.get("track_age", 1)),
+                        d.confidence,
+                        d.area,
+                    ),
+                )
+                self._selected_track = selected.track_id
+            selected.metadata["tracking_mode"] = "visual-avatar"
 
-        selected.metadata["requested_player"] = requested.removeprefix("player:").strip()
-        selected.metadata["tracking_mode"] = "visual-avatar"
+        selected.metadata["requested_player"] = username
         selected.source = "player_tracker"
         return selected
