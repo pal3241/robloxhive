@@ -247,6 +247,17 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         try:
             if request.role == "player":
                 instances.mark_player(pid)
+                for node in body_nodes.values():
+                    metadata = node.get("metadata") or {}
+                    if int(metadata.get("pid") or 0) == pid:
+                        runtime.commands.publish(Command(
+                            source="dashboard",
+                            type="DISARM",
+                            payload={
+                                "agent_id": node.get("agent_id"),
+                                "pid": pid,
+                            },
+                        ))
             elif request.role == "bot":
                 if not request.agent_id:
                     raise HTTPException(status_code=400, detail="agent_id is required for bot")
@@ -270,10 +281,17 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                     },
                 ))
             else:
+                previous_agent = match.agent_id
                 match.protected = False
                 match.agent_id = None
                 from robloxhive.shared.models import InstanceRole
                 match.role = InstanceRole.UNASSIGNED
+                if previous_agent:
+                    runtime.commands.publish(Command(
+                        source="dashboard",
+                        type="DISARM",
+                        payload={"agent_id": previous_agent, "pid": pid},
+                    ))
         except ProtectedInstanceError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
