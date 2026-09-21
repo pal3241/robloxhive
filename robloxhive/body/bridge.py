@@ -36,6 +36,7 @@ class BodyBridge:
         self.armed = False
         self._last_register = 0.0
         self._last_context_check = 0.0
+        self._manual_game_context = False
 
     def _json(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -50,7 +51,7 @@ class BodyBridge:
             return json.loads(raw) if raw else None
 
     def _refresh_game_context(self, force: bool = False) -> None:
-        if os.name != "nt":
+        if os.name != "nt" or self._manual_game_context:
             return
         now = time.monotonic()
         if not force and now - self._last_context_check < 2.0:
@@ -174,6 +175,7 @@ class BodyBridge:
                         pass
                     self.executor = executor
                     self.metadata.update(new_metadata)
+                    self._manual_game_context = False
                     self.armed = True
                     self.register(force=True)
                     result = {
@@ -227,6 +229,7 @@ class BodyBridge:
                     self.metadata["game_id"] = place_id
                     self.metadata["place_id"] = place_id
                     self.metadata["game_context_source"] = "dashboard"
+                    self._manual_game_context = True
                     self.register(force=True)
                     result = {
                         "ok": True,
@@ -266,6 +269,7 @@ class BodyBridge:
                     # Roblox protocol launch is intentionally generic: the
                     # dashboard chooses the place at runtime instead of binding
                     # a Body to one game in the CLI.
+                    self._manual_game_context = False
                     os.startfile(f"roblox://placeID={place_id}")
                     reconfigured = False
                     if self.executor_factory is not None:
