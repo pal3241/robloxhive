@@ -165,6 +165,7 @@ class MM2Autonomy:
             "players_visible": len(scene.players),
             "knives_visible": len(scene.knives),
             "guns_visible": len(scene.guns),
+            "dropped_guns_visible": len(scene.dropped_guns),
             "bodies_visible": len(scene.bodies),
             "ui_text_sample": scene.ui_text[:12],
         }
