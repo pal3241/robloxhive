@@ -1,6 +1,7 @@
 import unittest
 
 from robloxhive.body.perception import Detection
+from robloxhive.games.murder_mystery_2.autonomy import MM2Autonomy
 from robloxhive.games.murder_mystery_2.combat import MM2Combat, MM2CombatConfig
 from robloxhive.games.murder_mystery_2.models import (
     MM2Role,
@@ -9,6 +10,7 @@ from robloxhive.games.murder_mystery_2.models import (
     RoundPhase,
 )
 from robloxhive.games.murder_mystery_2.role_detector import MM2RoleDetector
+from robloxhive.games.murder_mystery_2.scene import MM2SceneReader
 from robloxhive.games.murder_mystery_2.survival import MM2Survival, SurvivalConfig
 from robloxhive.games.murder_mystery_2.threat import MM2ThreatModel
 
@@ -31,6 +33,16 @@ class FakeInput:
 
     def release_all(self):
         self.actions.append(("release",))
+
+
+class FakePerception:
+    adapters = []
+
+    def __init__(self, frame_size=(1000, 600)):
+        self._frame_size = frame_size
+
+    def frame_size(self):
+        return self._frame_size
 
 
 def player(track_id, x, y, w=100, h=180, *, knife=False, gun=False, self_player=False):
@@ -166,6 +178,67 @@ class MM2Tests(unittest.TestCase):
         self.assertTrue(moved)
         self.assertEqual(reason, "PANIC_EVADE")
         self.assertTrue(any(a[0] == "move" and a[1] == "left" for a in inputs.actions))
+
+
+    def test_autonomy_does_not_attack_on_single_unstable_role_frame(self):
+        inputs = FakeInput()
+        autonomy = MM2Autonomy(FakePerception(), inputs)
+        autonomy.survival.evade = lambda *_args, **_kwargs: (False, "SAFE")
+
+        murderer = player(2, 430, 120, knife=True)
+        scene = MM2SceneSnapshot(
+            (1000, 600),
+            players=[murderer],
+            ui_text=["You are Sheriff"],
+        )
+        autonomy.scene_reader.observe = lambda: scene
+
+        status = autonomy.tick()
+
+        self.assertEqual(status["role"], MM2Role.UNKNOWN.value)
+        self.assertEqual(status["phase"], RoundPhase.ROLE_REVEAL.value)
+        self.assertEqual(status["last_action"], "waiting_for_stable_role")
+        self.assertFalse(any(action[0] == "click" for action in inputs.actions))
+
+    def test_autonomy_allows_offense_after_role_stabilizes(self):
+        inputs = FakeInput()
+        autonomy = MM2Autonomy(FakePerception(), inputs)
+        autonomy.survival.evade = lambda *_args, **_kwargs: (False, "SAFE")
+        autonomy.combat.config.fire_cooldown_s = 0.0
+        autonomy.tick_interval_s = 0.0
+
+        murderer = player(2, 430, 120, knife=True)
+        scene = MM2SceneSnapshot(
+            (1000, 600),
+            players=[murderer],
+            ui_text=["You are Sheriff"],
+        )
+        autonomy.scene_reader.observe = lambda: scene
+
+        first = autonomy.tick()
+        second = autonomy.tick()
+
+        self.assertEqual(first["role"], MM2Role.UNKNOWN.value)
+        self.assertEqual(second["role"], MM2Role.SHERIFF.value)
+        self.assertEqual(second["phase"], RoundPhase.ROUND.value)
+        self.assertTrue(any(action[0] == "click" for action in inputs.actions))
+
+    def test_scene_preserves_zero_track_id_and_separates_untracked_players(self):
+        reader = MM2SceneReader(FakePerception())
+        detections = [
+            Detection("player", 0.9, 20, 20, 50, 80, source="test", track_id=0),
+            Detection("player", 0.9, 120, 20, 50, 80, source="test", track_id=None),
+            Detection("player", 0.9, 220, 20, 50, 80, source="test", track_id=None),
+        ]
+        reader._detections = lambda: detections
+        reader._texts = lambda: []
+
+        scene = reader.observe()
+        track_ids = [p.track_id for p in scene.players]
+
+        self.assertEqual(track_ids[0], 0)
+        self.assertEqual(track_ids[1:], [-1, -2])
+        self.assertEqual(len(set(track_ids)), 3)
 
 
 if __name__ == "__main__":
