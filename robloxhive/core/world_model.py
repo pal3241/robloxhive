@@ -137,7 +137,7 @@ class WorldModel:
         except Exception:
             snapshot.game = {}
 
-        joined_ui = " | ".join(snapshot.ui_text)
+        joined_ui = " ".join(snapshot.ui_text)
         role_match = re.search(
             r"(?i)\byou\s+are(?:\s+the)?\s+([a-z][a-z0-9 _-]{1,28})",
             joined_ui,
