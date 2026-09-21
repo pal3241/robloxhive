@@ -71,6 +71,12 @@ class DirectControlResult(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+class BindInstanceResult(BaseModel):
+    agent_id: str
+    bind_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
 class BodyResultRequest(BaseModel):
     agent_id: str = "agent-01"
     plan_id: str
@@ -155,6 +161,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     game_controls: dict[str, dict[str, Any]] = {}
     join_requests: dict[str, dict[str, Any]] = {}
     direct_controls: dict[str, dict[str, Any]] = {}
+    bind_requests: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
 
     def body_snapshot() -> list[dict[str, Any]]:
@@ -245,6 +252,23 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                     raise HTTPException(status_code=400, detail="agent_id is required for bot")
                 match.protected = False
                 instances.assign_bot(pid, request.agent_id)
+                bind_id = uuid4().hex[:12]
+                bind_requests[bind_id] = {
+                    "bind_id": bind_id,
+                    "agent_id": request.agent_id,
+                    "pid": pid,
+                    "status": "queued",
+                    "created_at": time.time(),
+                }
+                runtime.commands.publish(Command(
+                    source="dashboard",
+                    type="BIND_INSTANCE",
+                    payload={
+                        "bind_id": bind_id,
+                        "agent_id": request.agent_id,
+                        "pid": pid,
+                    },
+                ))
             else:
                 match.protected = False
                 match.agent_id = None
@@ -364,6 +388,35 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                 result=request.result, finished_at=time.time(),
             )
             return join_requests[request.join_id]
+        return {"status": "orphan_result", "result": request.result}
+
+    @app.get("/api/body/binds")
+    def get_bind_requests() -> list[dict[str, Any]]:
+        return sorted(
+            bind_requests.values(),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )[:30]
+
+    @app.post("/api/body/bind-results")
+    def bind_instance_result(request: BindInstanceResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+            if request.result.get("ok"):
+                node["metadata"] = {
+                    **(node.get("metadata") or {}),
+                    "pid": request.result.get("pid"),
+                    "hwnd": request.result.get("hwnd"),
+                    "title": request.result.get("title"),
+                }
+        if request.bind_id and request.bind_id in bind_requests:
+            bind_requests[request.bind_id].update(
+                status="complete" if request.result.get("ok") else "failed",
+                result=request.result,
+                finished_at=time.time(),
+            )
+            return bind_requests[request.bind_id]
         return {"status": "orphan_result", "result": request.result}
 
     @app.post("/api/body/control")
