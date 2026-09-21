@@ -152,7 +152,11 @@ class MM2Autonomy:
         # This keeps one noisy detector frame from enabling offensive behavior.
         own = next((p for p in scene.players if p.is_self), None)
         visual_role = MM2Role.UNKNOWN
-        if self.role_detector.current_role is MM2Role.UNKNOWN and own is not None:
+        if (
+            self.role_detector.current_role is MM2Role.UNKNOWN
+            and phase not in {RoundPhase.LOBBY, RoundPhase.ROUND_END}
+            and own is not None
+        ):
             if own.has_knife:
                 visual_role = MM2Role.MURDERER
             elif own.has_gun:
@@ -289,6 +293,8 @@ class MM2Autonomy:
             "threat_evidence_recent": list(self.threats.evidence_log)[-10:],
             "new_kill_events": self._last_kill_events_count,
             "stable_role": self.role_detector.current_role.value,
+            "ocr_candidate_role": self.role_detector.candidate_role.value,
+            "ocr_candidate_confidence": self.role_detector.candidate_confidence,
             "visual_role_candidate": self._visual_role_candidate.value,
             "visual_role_frames": self._visual_role_frames,
         }
