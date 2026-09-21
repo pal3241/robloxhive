@@ -66,6 +66,7 @@ class BodyBridge:
             return False
 
     def poll_once(self, wait_s: float = 1.0) -> dict[str, Any] | None:
+        self.executor.autonomy_tick()
         self.register()
         query = urlencode({"agent_id": self.agent_id, "timeout": max(0.0, min(wait_s, 5.0))})
         try:
@@ -98,6 +99,19 @@ class BodyBridge:
                 payload={
                     "agent_id": self.agent_id,
                     "probe_id": payload.get("probe_id"),
+                    "result": result,
+                },
+            )
+            return command
+
+        if command.get("type") == "GAME_CONTROL":
+            result = self.executor.game_control(payload)
+            self._json(
+                "/api/body/game-control-results",
+                method="POST",
+                payload={
+                    "agent_id": self.agent_id,
+                    "control_id": payload.get("control_id"),
                     "result": result,
                 },
             )
@@ -150,11 +164,11 @@ class BodyBridge:
             },
         )
 
-    def run_forever(self, idle_sleep_s: float = 0.15) -> None:
+    def run_forever(self, idle_sleep_s: float = 0.03) -> None:
         self.running = True
         self.register(force=True)
         while self.running:
-            command = self.poll_once(wait_s=1.0)
+            command = self.poll_once(wait_s=0.15)
             if command is None:
                 time.sleep(idle_sleep_s)
 
