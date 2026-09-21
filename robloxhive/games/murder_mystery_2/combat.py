@@ -16,6 +16,9 @@ class MM2CombatConfig:
     throw_cooldown_s: float = 1.15
     melee_cooldown_s: float = 0.22
     crowd_padding_px: float = 34.0
+    sheriff_lead_s: float = 0.08
+    knife_throw_lead_s: float = 0.20
+    max_lead_px: float = 140.0
 
 
 class MM2Combat:
@@ -27,13 +30,37 @@ class MM2Combat:
         self._last_melee = 0.0
 
     @staticmethod
-    def _center(player: PlayerObservation) -> tuple[int, int]:
+    def _center(player: PlayerObservation) -> tuple[float, float]:
         d = player.detection
-        # Aim upper torso rather than feet.
-        return int(d.center_x), int(d.y + d.height * 0.38)
+        return float(d.center_x), float(d.y + d.height * 0.38)
 
-    def _crowd_clear(self, target: PlayerObservation, scene: MM2SceneSnapshot) -> bool:
-        tx, ty = self._center(target)
+    def _lead_point(
+        self,
+        player: PlayerObservation,
+        scene: MM2SceneSnapshot,
+        lead_s: float,
+    ) -> tuple[int, int]:
+        x, y = self._center(player)
+        velocity = player.detection.metadata.get("velocity_px_s", [0.0, 0.0])
+        try:
+            vx, vy = float(velocity[0]), float(velocity[1])
+        except (TypeError, ValueError, IndexError):
+            vx, vy = 0.0, 0.0
+
+        lead_x = max(-self.config.max_lead_px, min(self.config.max_lead_px, vx * lead_s))
+        lead_y = max(-self.config.max_lead_px, min(self.config.max_lead_px, vy * lead_s))
+        w, h = scene.frame_size
+        px = int(max(0, min(max(0, w - 1), x + lead_x))) if w > 0 else int(x + lead_x)
+        py = int(max(0, min(max(0, h - 1), y + lead_y))) if h > 0 else int(y + lead_y)
+        return px, py
+
+    def _crowd_clear(
+        self,
+        target: PlayerObservation,
+        scene: MM2SceneSnapshot,
+        aim_point: tuple[int, int],
+    ) -> bool:
+        tx, ty = aim_point
         pad = self.config.crowd_padding_px
         for other in scene.players:
             if other.track_id == target.track_id:
@@ -47,12 +74,13 @@ class MM2Combat:
         now = time.monotonic()
         if target.murderer_confidence < self.config.sheriff_fire_confidence:
             return False, "MURDERER_CONFIDENCE_TOO_LOW"
-        if not self._crowd_clear(target, scene):
+        aim_point = self._lead_point(target, scene, self.config.sheriff_lead_s)
+        if not self._crowd_clear(target, scene, aim_point):
             return False, "FRIENDLY_FIRE_RISK"
         if now - self._last_fire < self.config.fire_cooldown_s:
             return False, "GUN_COOLDOWN"
 
-        x, y = self._center(target)
+        x, y = aim_point
         self.input.key("1", 0.05)
         self.input.aim_client(x, y)
         self.input.click_client(x, y, "left")
@@ -67,12 +95,13 @@ class MM2Combat:
         w, h = scene.frame_size
         area_ratio = target.area_ratio((w, h))
         now = time.monotonic()
-        x, y = self._center(target)
+        center_x, center_y = self._center(target)
 
         self.input.key("1", 0.05)
-        self.input.aim_client(x, y)
 
         if area_ratio >= self.config.melee_area_ratio:
+            x, y = int(center_x), int(center_y)
+            self.input.aim_client(x, y)
             if now - self._last_melee < self.config.melee_cooldown_s:
                 return False, "MELEE_COOLDOWN", "melee"
             self.input.click_client(x, y, "left")
@@ -82,6 +111,8 @@ class MM2Combat:
         if area_ratio >= self.config.throw_min_area_ratio:
             if now - self._last_throw < self.config.throw_cooldown_s:
                 return False, "THROW_COOLDOWN", "throw"
+            x, y = self._lead_point(target, scene, self.config.knife_throw_lead_s)
+            self.input.aim_client(x, y)
             self.input.click_client(x, y, "right")
             self._last_throw = now
             return True, "KNIFE_THROW", "throw"
