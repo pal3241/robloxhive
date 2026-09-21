@@ -112,6 +112,44 @@ class MM2V09Tests(unittest.TestCase):
         events = reasoner.update(scene, threats)
         self.assertEqual(events, [])
 
+    def test_manual_review_clamps_boxes_to_image_bounds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            recorder = MM2DatasetRecorder(None, root=tmp)
+            sample_id = "sample-review"
+            image_path = recorder.raw_images / f"{sample_id}.png"
+            image_path.write_bytes(b"fake-image")
+            ann_path = recorder.raw_annotations / f"{sample_id}.json"
+            ann_path.write_text(
+                json.dumps(
+                    {
+                        "id": sample_id,
+                        "image": str(image_path),
+                        "width": 100,
+                        "height": 50,
+                        "boxes": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reviewed = recorder.review(
+                sample_id,
+                [
+                    {
+                        "label": "player",
+                        "x": 90,
+                        "y": 45,
+                        "width": 50,
+                        "height": 50,
+                        "approved": True,
+                    }
+                ],
+            )
+            box = reviewed["boxes"][0]
+            self.assertEqual(box["x"], 90)
+            self.assertEqual(box["y"], 45)
+            self.assertEqual(box["width"], 10)
+            self.assertEqual(box["height"], 5)
+
     def test_dataset_export_only_uses_approved_boxes(self):
         with tempfile.TemporaryDirectory() as tmp:
             recorder = MM2DatasetRecorder(None, root=tmp)
