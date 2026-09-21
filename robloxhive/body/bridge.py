@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any
 from urllib.error import URLError, HTTPError
@@ -48,6 +49,16 @@ class BodyBridge:
             return True
         try:
             description = self.executor.describe()
+            live_metadata = dict(self.metadata)
+            if os.name == "nt":
+                try:
+                    from robloxhive.body.discovery import discover_roblox_windows
+                    live_metadata["windows"] = [
+                        {"pid": w.pid, "hwnd": w.hwnd, "title": w.title, "alive": w.alive}
+                        for w in discover_roblox_windows()
+                    ]
+                except Exception as exc:
+                    live_metadata["window_scan_error"] = str(exc)
             self._json(
                 "/api/body/register",
                 method="POST",
@@ -55,7 +66,7 @@ class BodyBridge:
                     "agent_id": self.agent_id,
                     "skills": description["skills"],
                     "metadata": {
-                        **self.metadata,
+                        **live_metadata,
                         **description.get("metadata", {}),
                     },
                 },
@@ -99,6 +110,30 @@ class BodyBridge:
                 payload={
                     "agent_id": self.agent_id,
                     "probe_id": payload.get("probe_id"),
+                    "result": result,
+                },
+            )
+            return command
+
+        if command.get("type") == "JOIN_GAME":
+            place_id = int(payload.get("place_id") or 0)
+            result: dict[str, Any]
+            if place_id <= 0:
+                result = {"ok": False, "error": "INVALID_PLACE_ID"}
+            elif os.name != "nt":
+                result = {"ok": False, "error": "JOIN_GAME_WINDOWS_ONLY"}
+            else:
+                try:
+                    os.startfile(f"roblox://placeID={place_id}")
+                    result = {"ok": True, "place_id": place_id, "status": "launch_requested"}
+                except OSError as exc:
+                    result = {"ok": False, "error": str(exc), "place_id": place_id}
+            self._json(
+                "/api/body/join-results",
+                method="POST",
+                payload={
+                    "agent_id": self.agent_id,
+                    "join_id": payload.get("join_id"),
                     "result": result,
                 },
             )
