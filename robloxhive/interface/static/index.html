@@ -1052,7 +1052,7 @@ $('#mm2RejectAll').onclick=async()=>{
   setTimeout(async()=>{await mm2DatasetAction('preview',{sample_id:mm2CurrentDatasetSample});setTimeout(loadMM2DatasetControls,350)},350);
 };
 
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='instances')loadInstances();if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(active==='mm2'){loadMM2();loadMM2DatasetControls()}},2000);
+health();refreshActiveTab();setInterval(refreshActiveTab,3000);setInterval(health,15000);
 </script>
 </body>
 </html>
