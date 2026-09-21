@@ -30,6 +30,7 @@ class PlayerObservation:
     has_knife: bool = False
     has_gun: bool = False
     alive: bool = True
+    is_self: bool = False
     murderer_confidence: float = 0.0
     sheriff_confidence: float = 0.0
 
