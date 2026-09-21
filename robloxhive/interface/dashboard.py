@@ -76,6 +76,7 @@ class DirectControlRequest(BaseModel):
     agent_id: str = "agent-01"
     action: Literal["forward", "back", "left", "right", "jump", "interact", "release"]
     seconds: float = Field(default=0.15, ge=0.01, le=3.0)
+    mode: Literal["background", "reliable"] = "background"
 
 
 class DirectControlResult(BaseModel):
@@ -438,7 +439,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.post("/api/body/join")
     def join_game(request: JoinGameRequest) -> dict:
         node = body_nodes.get(request.agent_id)
-        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
             raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
         join_id = uuid4().hex[:12]
         join_requests[join_id] = {
@@ -562,6 +563,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             "agent_id": request.agent_id,
             "action": request.action,
             "seconds": request.seconds,
+            "mode": request.mode,
             "status": "queued",
             "created_at": time.time(),
         }
@@ -573,6 +575,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
                 "agent_id": request.agent_id,
                 "action": request.action,
                 "seconds": request.seconds,
+                "mode": request.mode,
             },
         ))
         return direct_controls[control_id]
