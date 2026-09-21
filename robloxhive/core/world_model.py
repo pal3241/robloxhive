@@ -83,20 +83,30 @@ class WorldModel:
             pass
 
         seen_entity_keys: set[tuple[Any, ...]] = set()
+        tracker_supplied_detector = False
         for adapter in getattr(perception, "adapters", []) or []:
             name = type(adapter).__name__
             try:
                 if name == "PlayerTracker":
                     detections = list(adapter.tracker.update())
+                    tracker_supplied_detector = True
+                    labels = set(getattr(adapter, "player_labels", ("player", "person", "avatar")))
                     for det in detections:
                         row = self._det_to_dict(det)
-                        row["kind"] = "player"
+                        is_player = str(row["label"]).lower() in labels
+                        row["kind"] = "player" if is_player else "entity"
                         key = ("track", row.get("track_id"), row["label"])
-                        if key not in seen_entity_keys:
+                        if key in seen_entity_keys:
+                            continue
+                        if is_player:
                             snapshot.players.append(row)
-                            snapshot.entities.append(row)
-                            seen_entity_keys.add(key)
+                        snapshot.entities.append(row)
+                        seen_entity_keys.add(key)
                 elif name == "OnnxYoloDetector":
+                    # DetectionTracker already invoked this detector above.
+                    # Do not run ONNX twice in one cognitive observation.
+                    if tracker_supplied_detector:
+                        continue
                     detections = list(adapter.detect())
                     for det in detections:
                         row = self._det_to_dict(det)
