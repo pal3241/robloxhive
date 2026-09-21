@@ -106,8 +106,19 @@ class GameControlResult(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+class MM2DatasetRequest(BaseModel):
+    agent_id: str = "agent-01"
+    action: Literal["capture", "list", "preview", "approve", "reject", "export", "status"]
+    sample_id: str | None = None
+    indices: list[int] | None = None
+    note: str | None = Field(default=None, max_length=300)
+    auto_approve_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    validation_ratio: float = Field(default=0.2, ge=0.0, le=0.5)
+    limit: int = Field(default=30, ge=1, le=200)
+
+
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="0.8.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="0.9.0")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     runtime = AgentRuntime(memory)
@@ -168,7 +179,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         online_bodies = sum(1 for body in body_snapshot() if body["online"])
         return {
             "ok": True,
-            "version": "0.8.0",
+            "version": "0.9.0",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
             "active_plan": active.id if active else None,
             "online_bodies": online_bodies,
@@ -470,6 +481,54 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             "agent_id": request.agent_id,
             "action": request.action,
             "role": request.role,
+            "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(Command(source="dashboard", type="GAME_CONTROL", payload=payload))
+        return game_controls[control_id]
+
+    @app.post("/api/games/mm2/dataset")
+    def mm2_dataset(request: MM2DatasetRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+        game = node.get("metadata", {}).get("game", {})
+        if game.get("adapter") != "murder_mystery_2":
+            raise HTTPException(status_code=409, detail="Selected Body is not running the MM2 adapter")
+
+        control_id = uuid4().hex[:12]
+        action_map = {
+            "capture": "dataset_capture",
+            "list": "dataset_list",
+            "preview": "dataset_preview",
+            "approve": "dataset_approve",
+            "reject": "dataset_approve",
+            "export": "dataset_export",
+            "status": "dataset_status",
+        }
+        payload: dict[str, Any] = {
+            "control_id": control_id,
+            "agent_id": request.agent_id,
+            "action": action_map[request.action],
+            "limit": request.limit,
+            "validation_ratio": request.validation_ratio,
+        }
+        if request.sample_id:
+            payload["sample_id"] = request.sample_id
+        if request.indices is not None:
+            payload["indices"] = request.indices
+        if request.note:
+            payload["note"] = request.note
+        if request.auto_approve_confidence is not None:
+            payload["auto_approve_confidence"] = request.auto_approve_confidence
+        if request.action in {"approve", "reject"}:
+            payload["approved"] = request.action == "approve"
+
+        game_controls[control_id] = {
+            "control_id": control_id,
+            "agent_id": request.agent_id,
+            "action": payload["action"],
+            "sample_id": request.sample_id,
             "status": "queued",
             "created_at": time.time(),
         }
