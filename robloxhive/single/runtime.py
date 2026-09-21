@@ -170,6 +170,8 @@ class SingleBotRuntime:
         self.game_id = game_id
         self.semantic_map = SemanticMap(self.memory, self.game_id)
         self.world = WorldModel(self.executor, self.game_id)
+        self._last_scene_signature = None
+        self._last_scene_change_at = time.monotonic()
         self.memory.remember(
             "episodic",
             f"Switched current game context to {self.game_id}",
