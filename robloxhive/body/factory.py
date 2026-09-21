@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from robloxhive.body.advanced_skills import AdvancedGenericSkills
 from robloxhive.body.capture import Win32WindowCapture
 from robloxhive.body.generic_skills import GenericVisualSkills, SkillConfig
 from robloxhive.body.input_win32 import Win32MessageInput, create_input_backend
@@ -79,10 +80,12 @@ def create_generic_skill_executor(
     background_input_backend = Win32MessageInput(hwnd)
     navigator = LocalNavigator(capture, perception, input_backend)
     skills = GenericVisualSkills(perception, input_backend, config, navigator=navigator)
+    advanced = AdvancedGenericSkills(perception, input_backend)
 
     executor = SkillExecutor()
     skills.register_into(executor)
-    executor.attach_perception(perception, metadata)
+    advanced.register_into(executor)
+    executor.attach_perception(perception, metadata, frame_source=capture)
     executor.attach_navigation(navigator)
     executor.attach_input(input_backend, background_input_backend)
     executor.metadata["input_mode"] = getattr(input_backend, "mode", input_mode)
