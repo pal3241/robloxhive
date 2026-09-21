@@ -533,27 +533,83 @@ async function selectGame(g){$('#memoryTitle').textContent=(g.game_name||'Game '
 async function loadGames(){try{const games=await api('/api/games');$('#games').innerHTML=games.length?'':'<p class="muted">Belum ada memory game.</p>';games.forEach(g=>{const b=document.createElement('button');b.className='secondary game-btn';b.innerHTML='<b>'+esc(g.game_name||'Game '+g.game_id)+'</b><div class="meta">ID '+g.game_id+' · '+g.research_sources+' sources · knowledge '+(g.knowledge_available?'ready':'pending')+(g.knowledge_available?' · '+Math.round((g.knowledge_confidence||0)*100)+'%':'')+'</div>';b.onclick=()=>selectGame(g);$('#games').appendChild(b)})}catch(e){$('#games').innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 
 async function loadAgentGames(){
-  const select=$('#goalGame');
-  const current=select.value;
+  const agentSelect=$('#goalAgent');
+  const gameInput=$('#goalGame');
   try{
-    const games=await api('/api/games');
-    select.innerHTML='<option value="">Pilih game...</option>';
-    games.filter(g=>g.knowledge_available).forEach(g=>{
-      const o=document.createElement('option');
-      o.value=String(g.game_id);
-      o.textContent=(g.game_name||('Game '+g.game_id))+' · '+g.game_id;
-      select.appendChild(o);
-    });
-    if([...select.options].some(o=>o.value===current))select.value=current;
+    const [nodes,games]=await Promise.all([getBodies(),api('/api/games')]);
+    const online=nodes.filter(n=>n.online);
+    syncSelect(
+      agentSelect,
+      online.map(n=>{
+        const game=bodyGameId(n), m=n.metadata||{};
+        return {value:n.agent_id,label:n.agent_id+' · PID '+(m.pid??'-')+' · game '+(game||'unknown')+(m.armed?' · ARMED':' · DISARMED')};
+      }),
+      'Pilih Body...'
+    );
+
+    const selected=online.find(n=>n.agent_id===agentSelect.value);
+    const activeGame=bodyGameId(selected);
+    const previousAgent=gameInput.dataset.agent||'';
+    if(selected&&activeGame>0&&(gameInput.value===''||previousAgent!==selected.agent_id)){
+      gameInput.value=String(activeGame);
+    }
+    gameInput.dataset.agent=selected?.agent_id||'';
+
+    const known=new Map();
+    games.forEach(g=>known.set(Number(g.game_id),{
+      id:Number(g.game_id),
+      label:(g.game_name||('Game '+g.game_id))+(g.knowledge_available?' · knowledge ready':' · no knowledge')
+    }));
+    if(activeGame>0&&!known.has(activeGame))known.set(activeGame,{id:activeGame,label:'Current Body game · '+activeGame});
+    const datalist=$('#goalGameOptions');
+    const values=[...known.values()].sort((a,b)=>a.id-b.id);
+    const sig=JSON.stringify(values);
+    if(datalist.dataset.signature!==sig){
+      datalist.dataset.signature=sig;
+      datalist.replaceChildren(...values.map(item=>{
+        const o=document.createElement('option');o.value=String(item.id);o.label=item.label;return o;
+      }));
+    }
+
+    if(selected){
+      const m=selected.metadata||{};
+      const src=m.game_context_source||'manual/unknown';
+      $('#goalGameStatus').textContent='Body '+selected.agent_id+' · current game '+(activeGame||'unknown')+' · context '+src+' · '+(m.armed?'ARMED':'DISARMED');
+    }else{
+      $('#goalGameStatus').textContent='Pilih Body untuk membaca game aktif.';
+    }
   }catch(e){$('#goalMessage').textContent=e.message}
 }
+function updateGoalTargetUI(){
+  const type=$('#goalType').value;
+  const label=$('#goalTargetLabel'), input=$('#goalTarget');
+  input.required=false;
+  if(type==='follow_player'){
+    label.textContent='Username Roblox';
+    input.placeholder='contoh: jarwogamin';
+    input.required=true;
+  }else if(type==='combat'){
+    label.textContent='Target combat (optional)';
+    input.placeholder='enemy / boss / player';
+  }else if(type==='quest'){
+    label.textContent='Quest / target (optional)';
+    input.placeholder='nama quest / NPC / objective';
+  }else{
+    label.textContent='Target (optional)';
+    input.placeholder='lokasi / item / objective';
+  }
+}
+$('#goalAgent').addEventListener('change',()=>loadAgentGames());
+$('#goalType').addEventListener('change',updateGoalTargetUI);
+updateGoalTargetUI();
+
 function renderPlan(plan){
   const root=$('#activePlan');
   if(!plan){root.innerHTML='<p class="muted">Belum ada plan aktif.</p>';return}
   root.innerHTML='';
   const head=document.createElement('div');
   head.className='item';
-  head.innerHTML='<b>'+esc(plan.goal?.type||'goal')+'</b> <span class="pill">'+esc(plan.status)+'</span><div class="meta">Plan '+esc(plan.id)+' · Game '+esc(plan.game_id)+' · step '+Math.min((plan.current_step_index||0)+1,plan.steps?.length||0)+'/'+(plan.steps?.length||0)+'</div>';
+  head.innerHTML='<b>'+esc(plan.goal?.type||'goal')+'</b> <span class="pill">'+esc(plan.status)+'</span><div class="meta">Plan '+esc(plan.id)+' · Body '+esc(plan.agent_id||plan.goal?.metadata?.agent_id||'-')+' · Game '+esc(plan.game_id)+' · step '+Math.min((plan.current_step_index||0)+1,plan.steps?.length||0)+'/'+(plan.steps?.length||0)+'</div>';
   root.appendChild(head);
   (plan.steps||[]).forEach(step=>{
     const d=document.createElement('div');
@@ -566,22 +622,30 @@ function renderPlan(plan){
 async function loadActivePlan(){try{renderPlan(await api('/api/agent/active-plan'))}catch(e){$('#activePlan').innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 $('#goalForm').addEventListener('submit',async e=>{
   e.preventDefault();
-  $('#goalMessage').textContent='Membuat plan dari game knowledge…';
+  const agent=$('#goalAgent').value;
+  const gameId=Number($('#goalGame').value);
+  const type=$('#goalType').value;
+  const target=$('#goalTarget').value.trim();
+  if(!agent){$('#goalMessage').textContent='Pilih Windows Body.';return}
+  if(!gameId){$('#goalMessage').textContent='Masukkan Place ID game.';return}
+  if(type==='follow_player'&&!target){$('#goalMessage').textContent='Follow Player membutuhkan username Roblox.';return}
+  $('#goalMessage').textContent='Membuat plan untuk '+agent+'…';
   try{
     const body={
-      game_id:Number($('#goalGame').value),
-      type:$('#goalType').value,
-      target:$('#goalTarget').value.trim()||null,
+      agent_id:agent,
+      game_id:gameId,
+      type,
+      target:target||null,
       instruction:$('#goalInstruction').value,
       priority:Number($('#goalPriority').value),
       persistent:true
     };
     const plan=await api('/api/agent/goals',{method:'POST',body:JSON.stringify(body)});
-    $('#goalMessage').textContent='Plan '+plan.id+' dibuat dan step pertama dikirim ke Body command queue.';
+    $('#goalMessage').textContent='Plan '+plan.id+' → '+agent+' · game '+plan.game_id+(plan.knowledge_available?' · knowledge ready':' · observation fallback')+'.';
     renderPlan(plan);
   }catch(err){$('#goalMessage').textContent=err.message}
 });
-$('#refreshPlan').onclick=loadActivePlan;
+$('#refreshPlan').onclick=()=>{loadAgentGames();loadActivePlan()};
 
 
 async function loadBodies(){
