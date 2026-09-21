@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from robloxhive.core.native_math import native_math
 from robloxhive.shared.models import ActionResult, ActionStatus
 
 
@@ -171,11 +172,9 @@ class AdvancedGenericSkills:
             vx, vy = 0.0, 0.0
 
         lead_s = max(0.0, min(float(payload.get("lead_seconds") or self.config.lead_seconds), 0.5))
-        lead_x = max(-self.config.max_lead_px, min(self.config.max_lead_px, vx * lead_s))
-        lead_y = max(-self.config.max_lead_px, min(self.config.max_lead_px, vy * lead_s))
         ratio = max(0.15, min(float(payload.get("vertical_ratio") or self.config.upper_torso_ratio), 0.85))
-        x = int(hit.center_x + lead_x)
-        y = int(hit.y + hit.height * ratio + lead_y)
+        x = int(native_math.predict_axis(hit.center_x, vx, lead_s, self.config.max_lead_px))
+        y = int(native_math.predict_axis(hit.y + hit.height * ratio, vy, lead_s, self.config.max_lead_px))
 
         self.input.aim_client(x, y)
         return ActionResult(
@@ -188,6 +187,7 @@ class AdvancedGenericSkills:
                 "track_id": hit.track_id,
                 "velocity_px_s": [vx, vy],
                 "lead_seconds": lead_s,
+                "native_acceleration": native_math.enabled,
                 "evidence": {"target_visible": True, "aimed": True},
             },
         )
