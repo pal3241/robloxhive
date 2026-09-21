@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RobloxHive 1.0.0</title>
+<style>
+:root{
+  --bg:#08111f;--panel:#0d1b2e;--panel2:#10233d;--line:#1f3b5d;
+  --text:#dce9f8;--muted:#7892af;--blue:#1f6feb;--blue2:#164f9c;
+  --good:#37c98b;--warn:#e8ae4a;--bad:#ef6b73;--shadow:0 12px 32px #0007
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",Arial,sans-serif}
+button,input,select,textarea{font:inherit}
+.layout{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;background:#07101d;border-right:1px solid var(--line);padding:18px 12px}
+.brand{padding:8px 10px 20px}.brand b{font-size:20px}.brand small{display:block;color:var(--muted);margin-top:3px}
+.nav{display:grid;gap:5px}.nav button{border:0;background:transparent;color:#91a8c2;text-align:left;padding:10px 12px;border-radius:6px;cursor:pointer}
+.nav button:hover,.nav button.active{background:var(--panel2);color:white}.nav button.active{box-shadow:inset 3px 0 var(--blue)}
+.side-status{position:absolute;left:12px;right:12px;bottom:16px;padding:10px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}
+.main{min-width:0}.topbar{height:58px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:0 22px;background:#091524;position:sticky;top:0;z-index:10}
+.content{padding:20px;max-width:1450px}.view{display:none}.view.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.card{grid-column:span 6;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:var(--shadow)}
+.card.full{grid-column:1/-1}.card.third{grid-column:span 4}.card h2,.card h3{margin:0 0 12px}.card h2{font-size:17px}.card h3{font-size:14px;color:#aac3df}
+label{display:block;color:#9db3cb;margin:10px 0 5px}input,select,textarea{width:100%;border:1px solid #28496e;background:#071523;color:var(--text);border-radius:5px;padding:9px 10px;outline:none}textarea{min-height:96px;resize:vertical}input:focus,select:focus,textarea:focus{border-color:var(--blue)}
+button.primary,.action{border:1px solid #2d7ee9;background:var(--blue2);color:white;border-radius:5px;padding:9px 12px;cursor:pointer}button.secondary{border:1px solid #345375;background:#132945;color:#d9e7f6;border-radius:5px;padding:9px 12px;cursor:pointer}button.danger{border:1px solid #8e3740;background:#4c2028;color:white;border-radius:5px;padding:9px 12px;cursor:pointer}button:hover{filter:brightness(1.12)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.between{justify-content:space-between}.muted{color:var(--muted)}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#183252;color:#a9c5e5;border:1px solid #2d4d70;font-size:12px}.pill.good{background:#14372c;border-color:#225b47}.pill.bad{background:#3d2026;border-color:#6a333c}
+.metric{font-size:26px;font-weight:600}.metric-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.list{display:grid;gap:8px}.item{border:1px solid #203b59;background:#0a1828;border-radius:6px;padding:10px}.item b{color:#eaf4ff}
+pre{white-space:pre-wrap;word-break:break-word;background:#06101c;border:1px solid #203b59;border-radius:6px;padding:11px;max-height:380px;overflow:auto;color:#bad1ea}
+.controls{display:grid;grid-template-columns:repeat(3,58px);gap:7px;justify-content:center}.controls button{height:42px}.controls .blank{visibility:hidden}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:5px 12px}.kv div:nth-child(odd){color:var(--muted)}
+.log{font-family:Consolas,monospace;font-size:12px;max-height:330px;overflow:auto}.log div{padding:5px 0;border-bottom:1px solid #142a43}
+.progress{height:7px;background:#071523;border-radius:999px;overflow:hidden}.progress div{height:100%;background:var(--blue)}
+@media(max-width:900px){.layout{grid-template-columns:72px 1fr}.brand small,.brand b span,.nav button span,.side-status{display:none}.sidebar{padding:12px 7px}.nav button{text-align:center}.card,.card.third{grid-column:1/-1}.content{padding:12px}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><b>RH <span>RobloxHive</span></b><small>single bot intelligence</small></div>
+    <div class="nav">
+      <button class="active" data-view="overview">◈ <span>Overview</span></button>
+      <button data-view="agent">◆ <span>Agent</span></button>
+      <button data-view="game">▣ <span>Game & Controls</span></button>
+      <button data-view="vision">◉ <span>Vision & UI</span></button>
+      <button data-view="memory">▤ <span>Memory</span></button>
+      <button data-view="map">⌘ <span>Map</span></button>
+      <button data-view="learning">⇩ <span>Learning</span></button>
+      <button data-view="settings">⚙ <span>Settings</span></button>
+    </div>
+    <div class="side-status"><div id="wsStatus" class="muted">connecting...</div><div id="version" class="pill">v1.0.0</div></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div><b>RobloxHive</b> <span class="muted">/ one bot</span></div><div class="row"><span id="gameBadge" class="pill">game 0</span><span id="agentBadge" class="pill bad">PAUSED</span></div></header>
+    <div class="content">
+
+      <section id="overview" class="view active">
+        <div class="grid">
+          <div class="card third"><div class="metric-label">AI decisions</div><div id="mDecisions" class="metric">0</div></div>
+          <div class="card third"><div class="metric-label">Action success</div><div id="mSuccess" class="metric">0%</div></div>
+          <div class="card third"><div class="metric-label">Memories</div><div id="mMemory" class="metric">0</div></div>
+          <div class="card">
+            <h2>Current Goal</h2>
+            <div id="currentGoal" class="item muted">No goal.</div>
+            <div class="row" style="margin-top:10px"><button id="quickStart" class="primary">Enable AI</button><button id="quickPause" class="secondary">Pause</button></div>
+          </div>
+          <div class="card">
+            <h2>Ollama Brain</h2>
+            <div id="ollamaOverview" class="kv"></div>
+          </div>
+          <div class="card full">
+            <h2>Last Decision</h2>
+            <pre id="lastDecision">Waiting for a goal.</pre>
+          </div>
+          <div class="card full">
+            <h2>Recent Actions</h2>
+            <div id="recentActions" class="log"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="agent" class="view">
+        <div class="grid">
+          <div class="card">
+            <h2>Custom Scenario</h2>
+            <label>Goal type</label>
+            <select id="goalType">
+              <option value="custom">Custom / Let AI decide</option>
+              <option value="complete_game">Complete / Progress game</option>
+              <option value="follow_player">Follow player</option>
+              <option value="combat">Combat objective</option>
+              <option value="quest">Quest / mission</option>
+              <option value="explore">Explore / learn map</option>
+              <option value="survive">Survive</option>
+            </select>
+            <label id="targetLabel">Target (optional)</label>
+            <input id="goalTarget" placeholder="username / enemy / item / location">
+            <label>Instruction</label>
+            <textarea id="goalInstruction" placeholder="Example: cari cara membuka pintu ini, selesaikan objective, dan belajar dari kegagalan"></textarea>
+            <div class="row" style="margin-top:10px"><button id="setGoal" class="primary">Set Goal + Start</button><button id="pauseAgent" class="secondary">Pause</button></div>
+            <p id="goalMessage" class="muted"></p>
+          </div>
+          <div class="card">
+            <h2>Quick Follow Player</h2>
+            <label>Exact Roblox username</label><input id="followUsername" placeholder="username, not display name">
+            <button id="followButton" class="primary" style="margin-top:10px">Follow Username</button>
+            <p class="muted">Nameplate OCR must verify the username. The bot will not silently follow a random avatar.</p>
+            <h3 style="margin-top:18px">AI State</h3><pre id="agentState"></pre>
+          </div>
+          <div class="card full"><h2>Current World Context</h2><pre id="agentWorld"></pre></div>
+        </div>
+      </section>
+
+      <section id="game" class="view">
+        <div class="grid">
+          <div class="card">
+            <h2>Game Context</h2>
+            <label>Place / Game ID</label><input id="gameIdInput" type="number" min="0" value="0">
+            <button id="setGame" class="primary" style="margin-top:10px">Set Game Context</button>
+            <p class="muted">Use 0 for unknown. Memory and semantic map are isolated by game.</p>
+          </div>
+          <div class="card">
+            <h2>Manual Control</h2>
+            <label>Mode</label><select id="controlMode"><option value="background">Background / no focus</option><option value="reliable">Reliable / may focus bot</option></select>
+            <div class="controls" style="margin-top:12px">
+              <span class="blank"></span><button class="secondary ctrl" data-action="forward">W</button><span class="blank"></span>
+              <button class="secondary ctrl" data-action="left">A</button><button class="secondary ctrl" data-action="back">S</button><button class="secondary ctrl" data-action="right">D</button>
+              <button class="secondary ctrl" data-action="jump">Jump</button><button class="secondary ctrl" data-action="interact">E</button><button class="danger ctrl" data-action="release">Stop</button>
+            </div>
+            <p id="controlMessage" class="muted"></p>
+          </div>
+          <div class="card full"><h2>Game Adapter / Diagnostics</h2><pre id="gameDiagnostics"></pre></div>
+        </div>
+      </section>
+
+      <section id="vision" class="view">
+        <div class="grid">
+          <div class="card">
+            <h2>Probe Perception</h2>
+            <label>Label, username route, or UI text</label><input id="probeLabel" placeholder="player:Username / PLAY / enemy">
+            <button id="probeButton" class="primary" style="margin-top:10px">Probe</button>
+            <pre id="probeResult">No probe.</pre>
+          </div>
+          <div class="card">
+            <h2>Click UI Text</h2>
+            <label>Visible UI text</label><input id="uiText" placeholder="PLAY / Continue / Claim">
+            <button id="uiClick" class="primary" style="margin-top:10px">Find + Click</button>
+            <p id="uiMessage" class="muted"></p>
+          </div>
+          <div class="card full"><div class="row between"><h2>Live World Model</h2><button id="refreshWorld" class="secondary">Refresh</button></div><pre id="worldModel"></pre></div>
+        </div>
+      </section>
+
+      <section id="memory" class="view">
+        <div class="grid">
+          <div class="card">
+            <h2>Memory Search</h2>
+            <label>Query</label><input id="memoryQuery" placeholder="cara menang, lokasi shop, enemy, kegagalan terakhir...">
+            <button id="memorySearch" class="primary" style="margin-top:10px">Search Memory</button>
+            <p id="memoryStats" class="muted"></p>
+          </div>
+          <div class="card"><h2>Memory Types</h2><div id="memoryKinds" class="list"></div></div>
+          <div class="card full"><h2>Relevant Memories</h2><div id="memoryResults" class="list"></div></div>
+        </div>
+      </section>
+
+      <section id="map" class="view">
+        <div class="grid">
+          <div class="card"><h2>Semantic Map</h2><div id="mapSummary" class="kv"></div></div>
+          <div class="card"><h2>Important Landmarks</h2><div id="mapLandmarks" class="list"></div></div>
+          <div class="card full"><h2>Navigation Diagnostics</h2><pre id="navDiagnostics"></pre></div>
+        </div>
+      </section>
+
+      <section id="learning" class="view">
+        <div class="grid">
+          <div class="card">
+            <h2>Internet Learning</h2>
+            <label>Game ID</label><input id="learnGameId" type="number" min="1">
+            <label>Game name</label><input id="learnGameName" placeholder="Game name">
+            <label>What to learn</label><textarea id="learnObjective">Pelajari game dari pemula sampai selesai: mekanik, progression, map, UI, roles, team/enemy, combat, strategi, tips, dan kesalahan umum.</textarea>
+            <button id="learnStart" class="primary" style="margin-top:10px">Start Learning</button>
+            <p id="learnMessage" class="muted"></p>
+          </div>
+          <div class="card"><h2>Learning Jobs</h2><div id="learnJobs" class="list"></div></div>
+        </div>
+      </section>
+
+      <section id="settings" class="view">
+        <div class="grid">
+          <div class="card">
+            <h2>Ollama</h2>
+            <label>URL</label><input id="ollamaUrl" value="http://127.0.0.1:11434">
+            <label>Model</label><input id="ollamaModel" value="qwen2.5:3b">
+            <label><input id="ollamaVision" type="checkbox" style="width:auto"> Use vision screenshots if model supports images</label>
+            <button id="saveOllama" class="primary" style="margin-top:10px">Apply & Test</button>
+            <pre id="ollamaHealth"></pre>
+          </div>
+          <div class="card">
+            <h2>Architecture</h2>
+            <div class="item"><b>Local-first</b><div class="muted">Dashboard, memory, vision, map, controller, safety on Windows.</div></div>
+            <div class="item"><b>Ollama flexible</b><div class="muted">localhost on laptop or a reachable HP Ollama URL.</div></div>
+            <div class="item"><b>One bot only</b><div class="muted">No Body selector, no multi-agent heartbeat complexity.</div></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(url,opts={}){const r=await fetch(url,{headers:{"Content-Type":"application/json"},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
+let state={};
+function showView(id){document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active",v.id===id));document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===id));if(id==="memory")loadMemoryStats();if(id==="map")renderMap();if(id==="learning")loadLearning();if(id==="settings")loadOllama();if(id==="vision")refreshWorld()}
+document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>showView(b.dataset.view));
+
+function renderStatus(s){
+  state=s||{};
+  $("#gameBadge").textContent="game "+(s.game_id||0);
+  $("#agentBadge").textContent=s.enabled?"ACTIVE":"PAUSED";
+  $("#agentBadge").className="pill "+(s.enabled?"good":"bad");
+  $("#mDecisions").textContent=s.stats?.decisions||0;
+  const total=(s.stats?.successes||0)+(s.stats?.failures||0);
+  $("#mSuccess").textContent=total?Math.round((s.stats.successes||0)*100/total)+"%":"0%";
+  $("#mMemory").textContent=s.memory?.total||0;
+  const g=s.goal||{};
+  $("#currentGoal").innerHTML="<b>"+esc(g.type||"idle")+"</b><div class='muted'>"+esc(g.instruction||"")+"</div>"+(g.target?"<div>Target: "+esc(g.target)+"</div>":"");
+  $("#lastDecision").textContent=JSON.stringify(s.last_decision||{status:s.paused_reason||"waiting"},null,2);
+  $("#agentState").textContent=JSON.stringify({enabled:s.enabled,paused_reason:s.paused_reason,stats:s.stats,last_result:s.last_result},null,2);
+  $("#agentWorld").textContent=JSON.stringify(s.last_world||{},null,2);
+  $("#gameDiagnostics").textContent=JSON.stringify({game_id:s.game_id,skills:s.skills,last_world_game:s.last_world?.game,navigation:s.last_world?.navigation},null,2);
+  $("#recentActions").innerHTML="";
+  (s.recent_actions||[]).slice().reverse().forEach(a=>{const d=document.createElement("div");d.textContent=(a.success?"✓ ":"✕ ")+a.action+" — "+(a.reason||"");$("#recentActions").appendChild(d)});
+  const o=s.ollama||{};
+  $("#ollamaOverview").innerHTML="<div>URL</div><div>"+esc(o.url||"-")+"</div><div>Model</div><div>"+esc(o.model||"-")+"</div><div>Latency</div><div>"+esc(o.latency_ms||0)+" ms</div><div>Error</div><div class='"+(o.last_error?"bad":"good")+"'>"+esc(o.last_error||"none")+"</div>";
+  $("#gameIdInput").value=String(s.game_id||0);
+  $("#learnGameId").value=s.game_id>0?String(s.game_id):$("#learnGameId").value;
+  renderMap();
+}
+function connect(){
+  const ws=new WebSocket((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws");
+  ws.onopen=()=>{$("#wsStatus").textContent="live";$("#wsStatus").className="good"};
+  ws.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type==="status")renderStatus(m.data)}catch{}};
+  ws.onclose=()=>{$("#wsStatus").textContent="reconnecting";$("#wsStatus").className="warn";setTimeout(connect,1200)};
+  ws.onerror=()=>{try{ws.close()}catch{}};
+}
+$("#quickStart").onclick=()=>api("/api/agent/toggle",{method:"POST",body:JSON.stringify({enabled:true})});
+$("#quickPause").onclick=()=>api("/api/agent/toggle",{method:"POST",body:JSON.stringify({enabled:false})});
+$("#pauseAgent").onclick=()=>api("/api/agent/toggle",{method:"POST",body:JSON.stringify({enabled:false})});
+
+function updateGoalUI(){const follow=$("#goalType").value==="follow_player";$("#targetLabel").textContent=follow?"Exact Roblox username":"Target (optional)";$("#goalTarget").placeholder=follow?"username, not display name":"username / enemy / item / location"}
+$("#goalType").onchange=updateGoalUI;updateGoalUI();
+$("#setGoal").onclick=async()=>{try{const body={type:$("#goalType").value,instruction:$("#goalInstruction").value.trim(),target:$("#goalTarget").value.trim()||null,start:true};const r=await api("/api/agent/goal",{method:"POST",body:JSON.stringify(body)});$("#goalMessage").textContent="Goal active: "+r.goal.type}catch(e){$("#goalMessage").textContent=e.message}};
+$("#followButton").onclick=async()=>{const u=$("#followUsername").value.trim();if(!u)return;try{await api("/api/agent/goal",{method:"POST",body:JSON.stringify({type:"follow_player",instruction:"Follow this exact Roblox username and maintain a useful distance.",target:u,start:true})})}catch(e){alert(e.message)}};
+
+$("#setGame").onclick=async()=>{try{await api("/api/game",{method:"POST",body:JSON.stringify({game_id:Number($("#gameIdInput").value)||0})})}catch(e){alert(e.message)}};
+document.querySelectorAll(".ctrl").forEach(b=>b.onclick=async()=>{try{const r=await api("/api/control",{method:"POST",body:JSON.stringify({action:b.dataset.action,seconds:.18,mode:$("#controlMode").value})});$("#controlMessage").textContent=JSON.stringify(r)}catch(e){$("#controlMessage").textContent=e.message}});
+
+$("#probeButton").onclick=async()=>{try{$("#probeResult").textContent=JSON.stringify(await api("/api/perception/probe",{method:"POST",body:JSON.stringify({label:$("#probeLabel").value.trim()})}),null,2)}catch(e){$("#probeResult").textContent=e.message}};
+$("#uiClick").onclick=async()=>{try{const r=await api("/api/ui/click",{method:"POST",body:JSON.stringify({text:$("#uiText").value.trim()})});$("#uiMessage").textContent=JSON.stringify(r)}catch(e){$("#uiMessage").textContent=e.message}};
+async function refreshWorld(){try{$("#worldModel").textContent=JSON.stringify(await api("/api/world"),null,2)}catch(e){$("#worldModel").textContent=e.message}}$("#refreshWorld").onclick=refreshWorld;
+
+async function loadMemoryStats(){try{const m=await api("/api/memory");$("#memoryStats").textContent="Total "+m.total+" · relations "+m.relations+" · "+m.path;$("#memoryKinds").innerHTML="";Object.entries(m.by_kind||{}).forEach(([k,v])=>{const d=document.createElement("div");d.className="item";d.innerHTML="<b>"+esc(k)+"</b><span style='float:right'>"+v+"</span>";$("#memoryKinds").appendChild(d)})}catch(e){$("#memoryStats").textContent=e.message}}
+$("#memorySearch").onclick=async()=>{try{const rows=await api("/api/memory/search",{method:"POST",body:JSON.stringify({query:$("#memoryQuery").value,limit:30})});$("#memoryResults").innerHTML="";rows.forEach(m=>{const d=document.createElement("div");d.className="item";d.innerHTML="<b>"+esc(m.kind)+"</b> <span class='pill'>"+Math.round(m.confidence*100)+"%</span><div>"+esc(m.text)+"</div><div class='muted'>score "+m.score+(m.key?" · "+esc(m.key):"")+"</div>";$("#memoryResults").appendChild(d)})}catch(e){$("#memoryResults").textContent=e.message}};
+
+function renderMap(){const m=state.map||{};$("#mapSummary").innerHTML="<div>Game</div><div>"+esc(m.game_id||0)+"</div><div>Current</div><div>"+esc(m.current||"-")+"</div><div>Landmarks</div><div>"+esc(m.landmarks||0)+"</div><div>Edges</div><div>"+esc(m.edges||0)+"</div>";$("#mapLandmarks").innerHTML="";(m.best||[]).forEach(x=>{const d=document.createElement("div");d.className="item";d.innerHTML="<b>"+esc(x.name)+"</b><div class='muted'>"+esc(x.kind)+" · danger "+Math.round((x.danger||0)*100)+"% · value "+Math.round((x.value||0)*100)+"% · visits "+(x.visits||0)+"</div>";$("#mapLandmarks").appendChild(d)});$("#navDiagnostics").textContent=JSON.stringify(state.last_world?.navigation||{},null,2)}
+
+$("#learnStart").onclick=async()=>{try{const r=await api("/api/learn",{method:"POST",body:JSON.stringify({game_id:Number($("#learnGameId").value),game_name:$("#learnGameName").value,objective:$("#learnObjective").value})});$("#learnMessage").textContent="Learning job "+r.id+" started";loadLearning()}catch(e){$("#learnMessage").textContent=e.message}};
+async function loadLearning(){try{const jobs=await api("/api/learn");$("#learnJobs").innerHTML="";jobs.forEach(j=>{const d=document.createElement("div");d.className="item";const p=Math.round((j.completed||0)*100/Math.max(1,j.total||1));d.innerHTML="<b>"+esc(j.game_name)+"</b> <span class='pill'>"+esc(j.status)+"</span><div class='muted'>"+esc(j.stage)+" · "+p+"%</div><div class='progress'><div style='width:"+p+"%'></div></div>"+(j.error?"<div class='bad'>"+esc(j.error)+"</div>":"");$("#learnJobs").appendChild(d)})}catch(e){$("#learnJobs").textContent=e.message}}
+
+async function loadOllama(){try{const o=await api("/api/ollama");$("#ollamaUrl").value=o.url||$("#ollamaUrl").value;$("#ollamaModel").value=o.model||$("#ollamaModel").value;$("#ollamaHealth").textContent=JSON.stringify(o,null,2)}catch(e){$("#ollamaHealth").textContent=e.message}}
+$("#saveOllama").onclick=async()=>{try{const o=await api("/api/ollama",{method:"POST",body:JSON.stringify({url:$("#ollamaUrl").value.trim(),model:$("#ollamaModel").value.trim(),vision:$("#ollamaVision").checked})});$("#ollamaHealth").textContent=JSON.stringify(o,null,2)}catch(e){$("#ollamaHealth").textContent=e.message}};
+
+connect();api("/api/status").then(renderStatus).catch(()=>{});loadMemoryStats();
+</script>
+</body>
+</html>
