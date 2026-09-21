@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
 from typing import Any
 
 from robloxhive.games.murder_mystery_2.combat import MM2Combat
@@ -73,7 +74,7 @@ class MM2Autonomy:
                 note=str(payload.get("note") or "") or None,
                 auto_approve_confidence=auto_conf,
             )
-            return {"ok": True, "sample": sample.__dict__, "dataset": self.dataset.status()}
+            return {"ok": True, "sample": asdict(sample), "dataset": self.dataset.status()}
         elif action == "dataset_preview":
             if self.dataset is None:
                 return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
