@@ -32,17 +32,50 @@ class Win32MessageInput:
             raise RuntimeError("Win32MessageInput is Windows-only")
         self.hwnd = hwnd
 
-    def _post(self, msg: int, vk: int, lparam: int = 0) -> None:
+    def _targets(self) -> list[int]:
         try:
             import win32gui
         except ImportError as exc:
             raise RuntimeError("Win32MessageInput requires pywin32") from exc
         if not win32gui.IsWindow(self.hwnd):
             raise WindowInputError("BOT_WINDOW_INVALID")
-        win32gui.PostMessage(self.hwnd, msg, vk, lparam)
+
+        targets = [self.hwnd]
+
+        def collect(child: int, _extra: object) -> bool:
+            try:
+                if win32gui.IsWindowVisible(child):
+                    left, top, right, bottom = win32gui.GetClientRect(child)
+                    if right - left > 100 and bottom - top > 80:
+                        targets.append(child)
+            except Exception:
+                pass
+            return True
+
+        try:
+            win32gui.EnumChildWindows(self.hwnd, collect, None)
+        except Exception:
+            pass
+        return list(dict.fromkeys(targets))
+
+    def _post(self, msg: int, vk: int, lparam: int = 0) -> None:
+        try:
+            import win32gui
+        except ImportError as exc:
+            raise RuntimeError("Win32MessageInput requires pywin32") from exc
+        posted = False
+        for target in self._targets():
+            try:
+                win32gui.PostMessage(target, msg, vk, lparam)
+                posted = True
+            except Exception:
+                continue
+        if not posted:
+            raise WindowInputError("BOT_WINDOW_POSTMESSAGE_FAILED")
 
     def key(self, name: str, seconds: float = 0.08) -> None:
         try:
+            import win32api
             import win32con
         except ImportError as exc:
             raise RuntimeError("Win32MessageInput requires pywin32") from exc
@@ -52,9 +85,13 @@ class Win32MessageInput:
                 vk = ord(name.upper())
             else:
                 raise WindowInputError(f"UNKNOWN_KEY:{name}")
-        self._post(win32con.WM_KEYDOWN, vk, 0)
+
+        scan = int(win32api.MapVirtualKey(vk, 0)) & 0xFF
+        down_lparam = 1 | (scan << 16)
+        up_lparam = down_lparam | (1 << 30) | (1 << 31)
+        self._post(win32con.WM_KEYDOWN, vk, down_lparam)
         time.sleep(max(0.01, min(seconds, 3.0)))
-        self._post(win32con.WM_KEYUP, vk, 0)
+        self._post(win32con.WM_KEYUP, vk, up_lparam)
 
     def move(self, direction: str, seconds: float) -> None:
         self.key(direction, seconds)
