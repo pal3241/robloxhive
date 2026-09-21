@@ -53,7 +53,7 @@
   <section id="instances" class="view">
     <div class="grid">
       <div class="card">
-        <div class="row"><div><h2>Roblox Instances</h2><div class="muted">Window berasal dari Windows Body, bukan dari HP Brain.</div></div><button id="scan" class="secondary">Scan ulang</button></div>
+        <div class="row"><div><h2>Roblox Instances</h2><div class="muted">Window berasal dari Windows Body. Pilihan tidak di-reset setiap heartbeat.</div></div><button id="scan" class="secondary">Scan ulang</button></div>
         <div id="instanceList"></div>
       </div>
       <div class="card">
@@ -62,10 +62,18 @@
         <select id="sessionAgent"><option value="">Pilih Body...</option></select>
         <label>Roblox Place ID</label>
         <input id="joinPlaceId" type="number" min="1" placeholder="Contoh: 142823291">
-        <button id="joinGame" type="button">Join Game</button>
-        <p id="joinMessage" class="muted">Body dapat berpindah game tanpa restart RobloxHive.</p>
+        <div class="row">
+          <button id="setGameContext" class="secondary" type="button">Set Current Game</button>
+          <button id="joinGame" type="button">Join Game</button>
+        </div>
+        <p id="joinMessage" class="muted">Sudah berada di game? Gunakan Set Current Game. Join Game dipakai untuk membuka Place ID baru.</p>
         <div id="joinHistory"></div>
         <h3>Remote Control Test</h3>
+        <label>Control mode</label>
+        <select id="directControlMode">
+          <option value="background">Background — jangan pindah fokus</option>
+          <option value="reliable">Reliable — boleh fokus ke bot sementara</option>
+        </select>
         <div class="row"><button class="secondary direct-control" data-action="forward">W</button></div>
         <div class="row">
           <button class="secondary direct-control" data-action="left">A</button>
@@ -77,7 +85,7 @@
           <button class="secondary direct-control" data-action="interact">Interact (E)</button>
           <button class="secondary direct-control" data-action="release">Release Keys</button>
         </div>
-        <p id="controlMessage" class="muted">Gunakan ini untuk memastikan Body benar-benar dapat mengontrol window bot.</p>
+        <p id="controlMessage" class="muted">Background tidak mengambil fokus. Jika Roblox mengabaikannya, gunakan Reliable.</p>
       </div>
     </div>
   </section>
@@ -102,8 +110,13 @@
     <div class="grid">
       <form id="goalForm" class="card">
         <h2>Agent Goal</h2>
-        <p class="muted">Goal memakai knowledge game yang sudah dipelajari, lalu Planner membuat semantic skill plan untuk Windows Body.</p>
-        <label>Game</label><select id="goalGame" required><option value="">Pilih game...</option></select>
+        <p class="muted">Pilih Body dan game aktif. Knowledge membantu planner, tapi tidak lagi wajib untuk menjalankan goal.</p>
+        <label>Windows Body</label>
+        <select id="goalAgent" required><option value="">Pilih Body...</option></select>
+        <label>Game / Place ID</label>
+        <input id="goalGame" type="number" min="1" list="goalGameOptions" placeholder="Otomatis dari Body atau isi Place ID" required>
+        <datalist id="goalGameOptions"></datalist>
+        <div id="goalGameStatus" class="meta">Pilih Body untuk membaca game aktif.</div>
         <label>Goal type</label>
         <select id="goalType">
           <option value="autonomous_progress">Autonomous Progress</option>
@@ -113,8 +126,8 @@
           <option value="combat">Combat</option>
           <option value="explore">Explore</option>
         </select>
-        <label>Target (optional)</label><input id="goalTarget" placeholder="Player / enemy / quest / location">
-        <label>Instruction</label><textarea id="goalInstruction">Gunakan knowledge game untuk progress sebaik mungkin dan verifikasi setiap langkah dari gameplay.</textarea>
+        <label id="goalTargetLabel">Target (optional)</label><input id="goalTarget" placeholder="Enemy / quest / location">
+        <label>Instruction</label><textarea id="goalInstruction">Gunakan kondisi game saat ini untuk menentukan aksi berikutnya dan verifikasi setiap langkah dari gameplay.</textarea>
         <label>Priority</label><input id="goalPriority" type="number" min="0" max="100" value="70">
         <button type="submit">Start Goal</button>
         <p id="goalMessage" class="muted"></p>
