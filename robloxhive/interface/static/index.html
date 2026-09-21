@@ -354,28 +354,111 @@ dead_player</pre>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(b.dataset.tab==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(b.dataset.tab==='mm2'){loadMM2();loadMM2DatasetControls()}}));
-async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
-async function loadSessionBodies(){
-  const select=$('#sessionAgent'), current=select.value;
+const liveState={bodies:[],instances:[],lastSnapshot:0,wsConnected:false};
+const selectSignatures=new WeakMap();
+
+function bodyGameId(node){
+  const m=node?.metadata||{};
+  return Number(m.place_id||m.game_id||0);
+}
+function onlineBodies(){
+  return (liveState.bodies||[]).filter(n=>n.online);
+}
+function syncSelect(select,options,placeholder='Pilih...',autoSelectSingle=true){
+  if(!select)return;
+  const current=select.value;
+  const normalized=(options||[]).map(o=>({value:String(o.value),label:String(o.label)}));
+  const signature=JSON.stringify(normalized);
+  if(selectSignatures.get(select)!==signature){
+    const fragment=document.createDocumentFragment();
+    const empty=document.createElement('option');empty.value='';empty.textContent=placeholder;fragment.appendChild(empty);
+    normalized.forEach(item=>{const o=document.createElement('option');o.value=item.value;o.textContent=item.label;fragment.appendChild(o)});
+    select.replaceChildren(fragment);
+    selectSignatures.set(select,signature);
+  }
+  if(current&&normalized.some(o=>o.value===current))select.value=current;
+  else if(autoSelectSingle&&normalized.length===1)select.value=normalized[0].value;
+}
+async function getBodies(force=false){
+  if(!force&&Date.now()-liveState.lastSnapshot<5000&&liveState.bodies.length)return liveState.bodies;
+  const nodes=await api('/api/body/nodes');
+  liveState.bodies=nodes;
+  liveState.lastSnapshot=Date.now();
+  return nodes;
+}
+function setConnectionText(){
+  const base=$('#synthMode')?.dataset.synth||'';
+  if($('#synthMode'))$('#synthMode').textContent=base+(base?' · ':'')+(liveState.wsConnected?'Dashboard WS live':'HTTP fallback');
+}
+function applySnapshot(data){
+  if(data?.type!=='snapshot')return;
+  liveState.bodies=Array.isArray(data.bodies)?data.bodies:[];
+  liveState.instances=Array.isArray(data.instances)?data.instances:[];
+  liveState.lastSnapshot=Date.now();
+  setConnectionText();
+}
+function connectDashboardWS(){
+  const scheme=location.protocol==='https:'?'wss':'ws';
+  const ws=new WebSocket(scheme+'://'+location.host+'/ws/dashboard');
+  ws.onopen=()=>{liveState.wsConnected=true;setConnectionText()};
+  ws.onmessage=e=>{try{applySnapshot(JSON.parse(e.data))}catch{}};
+  ws.onclose=()=>{liveState.wsConnected=false;setConnectionText();setTimeout(connectDashboardWS,1800)};
+  ws.onerror=()=>{try{ws.close()}catch{}};
+}
+async function health(){
   try{
-    const nodes=await api('/api/body/nodes');
-    select.innerHTML='<option value="">Pilih Body...</option>';
-    nodes.filter(n=>n.online).forEach(n=>{
-      const o=document.createElement('option');
-      o.value=n.agent_id;
-      const m=n.metadata||{};
-      o.textContent=n.agent_id+' · PID '+(m.pid??'-')+' · game '+(m.game_id??0)+' · '+((m.input||{}).mode||m.input_mode||'input');
-      select.appendChild(o);
-    });
-    if([...select.options].some(o=>o.value===current))select.value=current;
-    else if(select.options.length===2)select.selectedIndex=1;
+    const d=await api('/api/health');
+    $('#health').textContent='● v'+d.version;
+    $('#health').className='pill ok';
+    $('#synthMode').dataset.synth='Synthesizer: '+d.synthesizer;
+    setConnectionText();
+  }catch{
+    $('#health').textContent='● offline';
+    $('#health').className='pill bad';
+  }
+}
+async function refreshActiveTab(){
+  if(refreshActiveTab.busy)return;
+  refreshActiveTab.busy=true;
+  try{
+    const active=document.querySelector('.tab.active')?.dataset.tab;
+    if(active==='memory')await loadGames();
+    if(active==='instances')await loadInstances();
+    if(active==='learn')await loadJobs();
+    if(active==='agent'){await loadAgentGames();await loadActivePlan()}
+    if(active==='skills'){await loadBodies();await loadSkillTests()}
+    if(active==='perception'){await loadPerceptionNodes();await loadPerceptionProbes()}
+    if(active==='navigation'){await loadNavigationNodes();await loadNavigationProbes()}
+    if(active==='mm2'){await loadMM2();await loadMM2DatasetControls()}
+  }finally{refreshActiveTab.busy=false}
+}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  $('#'+b.dataset.tab).classList.add('active');
+  refreshActiveTab();
+}));
+
+async function loadSessionBodies(){
+  try{
+    const nodes=await getBodies();
+    syncSelect(
+      $('#sessionAgent'),
+      nodes.filter(n=>n.online).map(n=>{
+        const m=n.metadata||{}, game=bodyGameId(n);
+        return {value:n.agent_id,label:n.agent_id+' · PID '+(m.pid??'-')+' · game '+(game||0)+' · '+((m.input||{}).mode||m.input_mode||'input')};
+      }),
+      'Pilih Body...'
+    );
   }catch{}
 }
 async function loadJoinHistory(){
   try{
     const rows=await api('/api/body/joins');
     const root=$('#joinHistory');
+    const signature=JSON.stringify(rows.slice(0,5).map(j=>[j.join_id,j.status,j.result?.error]));
+    if(root.dataset.signature===signature)return;
+    root.dataset.signature=signature;
     root.innerHTML='';
     rows.slice(0,5).forEach(j=>{
       const d=document.createElement('div');d.className='item';
@@ -386,29 +469,41 @@ async function loadJoinHistory(){
 }
 async function loadInstances(){
   const root=$('#instanceList');
-  root.innerHTML='<p class="muted">Scanning…</p>';
   await loadSessionBodies();
   try{
-    const items=await api('/api/instances');
-    root.innerHTML=items.length?'':'<p class="muted">Belum ada window. Pastikan Windows Body online dan tunggu heartbeat berikutnya.</p>';
-    items.forEach(i=>{
-      const div=document.createElement('div');div.className='item';
-      div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+(i.agent_id?' · '+esc(i.agent_id):'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN SELECTED BOT</button></div>';
-      div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');
-      div.querySelector('[data-bot]').onclick=()=>{
-        const agent=$('#sessionAgent').value||'agent-01';
-        setRole(i.pid,'bot',agent);
-      };
-      root.appendChild(div);
-    });
+    const items=(Date.now()-liveState.lastSnapshot<5000&&liveState.instances.length)?liveState.instances:await api('/api/instances');
+    if(!(Date.now()-liveState.lastSnapshot<5000))liveState.instances=items;
+    const signature=JSON.stringify(items.map(i=>[i.pid,i.hwnd,i.role,i.agent_id,i.protected,i.alive]));
+    if(root.dataset.signature!==signature){
+      root.dataset.signature=signature;
+      root.innerHTML=items.length?'':'<p class="muted">Belum ada window. Pastikan Windows Body online.</p>';
+      items.forEach(i=>{
+        const div=document.createElement('div');div.className='item';
+        div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+(i.agent_id?' · '+esc(i.agent_id):'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN SELECTED BOT</button></div>';
+        div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');
+        div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot',$('#sessionAgent').value||'agent-01');
+        root.appendChild(div);
+      });
+    }
     loadJoinHistory();
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 }
 async function setRole(pid,role,agent_id=null){
   await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});
-  loadInstances();
+  liveState.lastSnapshot=0;
+  setTimeout(()=>loadInstances(),250);
 }
-$('#scan').onclick=loadInstances;
+$('#scan').onclick=()=>{liveState.lastSnapshot=0;loadInstances()};
+$('#setGameContext').onclick=async()=>{
+  const agent=$('#sessionAgent').value, placeId=Number($('#joinPlaceId').value);
+  if(!agent){$('#joinMessage').textContent='Pilih Windows Body.';return}
+  if(!placeId){$('#joinMessage').textContent='Masukkan Place ID.';return}
+  try{
+    const r=await api('/api/body/game-context',{method:'POST',body:JSON.stringify({agent_id:agent,place_id:placeId})});
+    $('#joinMessage').textContent='Game context '+placeId+' dikirim ke '+agent+' ('+r.context_id+').';
+    liveState.lastSnapshot=0;
+  }catch(e){$('#joinMessage').textContent=e.message}
+};
 $('#joinGame').onclick=async()=>{
   const agent=$('#sessionAgent').value, placeId=Number($('#joinPlaceId').value);
   if(!agent){$('#joinMessage').textContent='Pilih Windows Body.';return}
@@ -422,12 +517,14 @@ $('#joinGame').onclick=async()=>{
 async function sendDirectControl(action){
   const agent=$('#sessionAgent').value;
   if(!agent){$('#controlMessage').textContent='Pilih Windows Body.';return}
+  const mode=$('#directControlMode').value||'background';
   try{
-    const r=await api('/api/body/control',{method:'POST',body:JSON.stringify({agent_id:agent,action,seconds:0.18})});
-    $('#controlMessage').textContent='Control '+action+' queued: '+r.control_id;
+    const r=await api('/api/body/control',{method:'POST',body:JSON.stringify({agent_id:agent,action,seconds:0.18,mode})});
+    $('#controlMessage').textContent='Control '+action+' ('+mode+') queued: '+r.control_id;
   }catch(e){$('#controlMessage').textContent=e.message}
 }
 document.querySelectorAll('.direct-control').forEach(b=>b.onclick=()=>sendDirectControl(b.dataset.action));
+connectDashboardWS();
 $('#learnForm').addEventListener('submit',async e=>{e.preventDefault();$('#learnMessage').textContent='Membuat learning job…';try{const d=await api('/api/learn',{method:'POST',body:JSON.stringify({game_id:Number($('#gameId').value),game_name:$('#gameName').value,objective:$('#objective').value})});$('#learnMessage').textContent='Job '+d.id+' dimulai. Research → synthesis → game memory.';loadJobs()}catch(err){$('#learnMessage').textContent=err.message}});
 async function loadJobs(){try{const jobs=await api('/api/learn/jobs');$('#jobs').innerHTML=jobs.length?'':'<p class="muted">Belum ada job.</p>';jobs.forEach(j=>{const p=Math.max(0,Math.min(100,Math.round((j.completed/Math.max(1,j.total))*100)));const div=document.createElement('div');div.className='item';const conf=j.status==='complete'?' · confidence '+Math.round((j.knowledge_confidence||0)*100)+'%':'';div.innerHTML='<b>'+esc(j.game_name)+'</b> <span class="pill">'+esc(j.status)+'</span><div class="muted">'+esc(j.stage)+' · '+p+'% · '+esc(j.synthesizer||'')+conf+'</div><div class="progress"><div style="width:'+p+'%"></div></div>'+(j.error?'<div class="bad">'+esc(j.error)+'</div>':'');$('#jobs').appendChild(div)})}catch(e){$('#jobs').innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 const labels={objectives:'Objectives',progression:'Progression',mechanics:'Mechanics',items:'Items / Upgrades',enemies:'Enemies',locations:'Locations',strategies:'Strategies / Tips',common_mistakes:'Common Mistakes',endgame:'Endgame / Win Conditions',unknowns:'Unknowns',conflicts:'Source Conflicts'};
