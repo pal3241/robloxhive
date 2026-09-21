@@ -120,6 +120,7 @@ class MM2DatasetRecorder:
         sample_id: str,
         max_width: int = 960,
         quality: int = 65,
+        draw_boxes: bool = True,
     ) -> str:
         try:
             import cv2
@@ -131,25 +132,26 @@ class MM2DatasetRecorder:
         if image is None:
             raise RuntimeError("DATASET_IMAGE_MISSING")
         h, w = image.shape[:2]
-        for index, box in enumerate(data.get("boxes", [])):
-            x1 = int(box.get("x", 0))
-            y1 = int(box.get("y", 0))
-            x2 = int(x1 + box.get("width", 0))
-            y2 = int(y1 + box.get("height", 0))
-            approved = bool(box.get("approved"))
-            color = (0, 220, 0) if approved else (0, 180, 255)
-            cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
-            label = f"{index}:{box.get('label','?')} {float(box.get('confidence',0))*100:.0f}%"
-            cv2.putText(
-                image,
-                label,
-                (x1, max(16, y1 - 4)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
-                color,
-                1,
-                cv2.LINE_AA,
-            )
+        if draw_boxes:
+            for index, box in enumerate(data.get("boxes", [])):
+                x1 = int(box.get("x", 0))
+                y1 = int(box.get("y", 0))
+                x2 = int(x1 + box.get("width", 0))
+                y2 = int(y1 + box.get("height", 0))
+                approved = bool(box.get("approved"))
+                color = (0, 220, 0) if approved else (0, 180, 255)
+                cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+                label = f"{index}:{box.get('label','?')} {float(box.get('confidence',0))*100:.0f}%"
+                cv2.putText(
+                    image,
+                    label,
+                    (x1, max(16, y1 - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
 
         if w > max_width:
             scale = max_width / float(w)
