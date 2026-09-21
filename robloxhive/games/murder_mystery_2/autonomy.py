@@ -79,8 +79,10 @@ class MM2Autonomy:
         if detected_role is MM2Role.UNKNOWN and own is not None:
             if own.has_knife:
                 detected_role, role_confidence, phase = MM2Role.MURDERER, 0.90, RoundPhase.ROUND
+                self.role_detector.current_role = MM2Role.MURDERER
             elif own.has_gun:
                 detected_role, role_confidence, phase = MM2Role.SHERIFF, 0.84, RoundPhase.ROUND
+                self.role_detector.current_role = MM2Role.SHERIFF
 
         role = self.state.role_override or detected_role
         self.state.role = role
