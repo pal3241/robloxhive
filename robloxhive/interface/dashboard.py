@@ -108,13 +108,14 @@ class GameControlResult(BaseModel):
 
 class MM2DatasetRequest(BaseModel):
     agent_id: str = "agent-01"
-    action: Literal["capture", "list", "preview", "approve", "reject", "export", "status"]
+    action: Literal["capture", "list", "preview", "approve", "reject", "review", "export", "status"]
     sample_id: str | None = None
     indices: list[int] | None = None
     note: str | None = Field(default=None, max_length=300)
     auto_approve_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     validation_ratio: float = Field(default=0.2, ge=0.0, le=0.5)
     limit: int = Field(default=30, ge=1, le=200)
+    boxes: list[dict[str, Any]] | None = None
 
 
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
@@ -503,6 +504,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             "preview": "dataset_preview",
             "approve": "dataset_approve",
             "reject": "dataset_approve",
+            "review": "dataset_review",
             "export": "dataset_export",
             "status": "dataset_status",
         }
@@ -521,6 +523,8 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             payload["note"] = request.note
         if request.auto_approve_confidence is not None:
             payload["auto_approve_confidence"] = request.auto_approve_confidence
+        if request.boxes is not None:
+            payload["boxes"] = request.boxes
         if request.action in {"approve", "reject"}:
             payload["approved"] = request.action == "approve"
 
