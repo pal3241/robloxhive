@@ -131,20 +131,46 @@ class ForegroundWin32Input:
     @contextmanager
     def _focused(self):
         try:
+            import win32api
             import win32con
             import win32gui
+            import win32process
         except ImportError as exc:
             raise RuntimeError("ForegroundWin32Input requires pywin32") from exc
 
         self._validate()
         previous = win32gui.GetForegroundWindow()
+        current_tid = win32api.GetCurrentThreadId()
+        attached: list[int] = []
+
         try:
             if win32gui.IsIconic(self.hwnd):
                 win32gui.ShowWindow(self.hwnd, win32con.SW_RESTORE)
                 time.sleep(0.05)
+
+            # Windows may reject SetForegroundWindow when another app owns the
+            # foreground lock. Temporarily attaching the UI input queues makes
+            # activation more reliable without injecting into Roblox.
+            tids: list[int] = []
+            if previous and win32gui.IsWindow(previous):
+                tids.append(win32process.GetWindowThreadProcessId(previous)[0])
+            tids.append(win32process.GetWindowThreadProcessId(self.hwnd)[0])
+            for tid in dict.fromkeys(tids):
+                if tid and tid != current_tid:
+                    try:
+                        win32process.AttachThreadInput(current_tid, tid, True)
+                        attached.append(tid)
+                    except Exception:
+                        pass
+
             win32gui.BringWindowToTop(self.hwnd)
             win32gui.SetForegroundWindow(self.hwnd)
-            time.sleep(0.035)
+            try:
+                win32gui.SetActiveWindow(self.hwnd)
+                win32gui.SetFocus(self.hwnd)
+            except Exception:
+                pass
+            time.sleep(0.04)
         except Exception as exc:
             raise WindowInputError(f"BOT_WINDOW_FOCUS_FAILED:{exc}") from exc
 
@@ -162,6 +188,11 @@ class ForegroundWin32Input:
             ):
                 try:
                     win32gui.SetForegroundWindow(previous)
+                except Exception:
+                    pass
+            for tid in reversed(attached):
+                try:
+                    win32process.AttachThreadInput(current_tid, tid, False)
                 except Exception:
                     pass
 
@@ -202,21 +233,37 @@ class ForegroundWin32Input:
     def aim_client(self, x: int, y: int) -> None:
         try:
             import pydirectinput
+            import win32api
         except ImportError as exc:
-            raise RuntimeError("Foreground input requires pydirectinput") from exc
+            raise RuntimeError("Foreground input requires pydirectinput and pywin32") from exc
         sx, sy = self._screen_point(x, y)
-        with self._focused():
-            pydirectinput.moveTo(sx, sy, duration=0)
+        previous_cursor = win32api.GetCursorPos()
+        try:
+            with self._focused():
+                pydirectinput.moveTo(sx, sy, duration=0)
+        finally:
+            try:
+                pydirectinput.moveTo(previous_cursor[0], previous_cursor[1], duration=0)
+            except Exception:
+                pass
 
     def click_client(self, x: int, y: int, button: str = "left") -> None:
         try:
             import pydirectinput
+            import win32api
         except ImportError as exc:
-            raise RuntimeError("Foreground input requires pydirectinput") from exc
+            raise RuntimeError("Foreground input requires pydirectinput and pywin32") from exc
         sx, sy = self._screen_point(x, y)
-        with self._focused():
-            pydirectinput.moveTo(sx, sy, duration=0)
-            pydirectinput.click(button="left" if button == "left" else "right")
+        previous_cursor = win32api.GetCursorPos()
+        try:
+            with self._focused():
+                pydirectinput.moveTo(sx, sy, duration=0)
+                pydirectinput.click(button="left" if button == "left" else "right")
+        finally:
+            try:
+                pydirectinput.moveTo(previous_cursor[0], previous_cursor[1], duration=0)
+            except Exception:
+                pass
 
     def release_all(self) -> None:
         try:
