@@ -90,6 +90,7 @@ def create_generic_skill_executor(
                 perception=perception,
                 input_backend=input_backend,
                 navigator=navigator,
+                frame_source=capture,
             )
         )
         executor.metadata["game_adapter"] = "murder_mystery_2"
