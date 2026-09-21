@@ -87,6 +87,7 @@ class SemanticMap:
         danger: float | None = None,
         value: float | None = None,
         metadata: dict[str, Any] | None = None,
+        set_current: bool = True,
     ) -> Landmark:
         key = name.strip().lower()
         item = self.landmarks.get(key)
@@ -104,7 +105,8 @@ class SemanticMap:
             item.value = max(0.0, min(float(value), 1.0))
         if metadata:
             item.metadata.update(metadata)
-        self.current = key
+        if set_current:
+            self.current = key
         self.memory.upsert_fact(
             "map",
             key,
