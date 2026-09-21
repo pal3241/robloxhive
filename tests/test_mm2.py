@@ -67,6 +67,15 @@ class MM2Tests(unittest.TestCase):
         self.assertGreater(confidence, 0.9)
         self.assertEqual(phase, RoundPhase.ROUND)
 
+        role, confidence, phase = detector.detect(["Coins: 12"])
+        self.assertEqual(role, MM2Role.SHERIFF)
+        self.assertGreater(confidence, 0.9)
+        self.assertEqual(phase, RoundPhase.ROUND)
+
+        role, confidence, phase = detector.detect(["Victory!"])
+        self.assertEqual(role, MM2Role.UNKNOWN)
+        self.assertEqual(phase, RoundPhase.ROUND_END)
+
     def test_threat_model_ignores_self_as_murderer_candidate(self):
         own = player(1, 450, 350, knife=True, self_player=True)
         other = player(2, 100, 180)
