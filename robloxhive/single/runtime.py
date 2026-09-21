@@ -388,6 +388,7 @@ class SingleBotRuntime:
             "reason": reason,
             "result": row,
             "success": success,
+            "world_fingerprint": self._world_fingerprint(self.last_world),
         }
         self.recent_actions.append(event)
         self.last_result = row
@@ -419,6 +420,45 @@ class SingleBotRuntime:
             importance=0.7 if not success else 0.55,
         )
         return event
+
+    @staticmethod
+    def _world_fingerprint(world: dict[str, Any]) -> str:
+        core = {
+            "ui": world.get("ui_text", [])[:20],
+            "entities": [
+                (item.get("label"), item.get("track_id"), item.get("box"))
+                for item in world.get("entities", [])[:30]
+                if isinstance(item, dict)
+            ],
+            "roles": world.get("roles", {}),
+            "enemies": world.get("enemies", [])[:12],
+            "game": world.get("game", {}),
+        }
+        return json.dumps(core, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+    def _would_repeat_failure(self, action: str, payload: dict[str, Any], world: dict[str, Any]) -> bool:
+        fingerprint = self._world_fingerprint(world)
+        signature = json.dumps(
+            {"action": action, "payload": payload},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+        )
+        matches = 0
+        for event in reversed(list(self.recent_actions)[-6:]):
+            event_sig = json.dumps(
+                {"action": event.get("action"), "payload": event.get("payload")},
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+            )
+            if event_sig != signature:
+                continue
+            if event.get("success"):
+                return False
+            if event.get("world_fingerprint") == fingerprint:
+                matches += 1
+        return matches >= 2
 
     def _execute(self, action: str, payload: dict[str, Any], reason: str) -> dict[str, Any]:
         if action in {"observe", "wait"} and action not in self.executor.available():
@@ -485,6 +525,22 @@ class SingleBotRuntime:
             "done": decision.done,
             "interpretation": decision.interpretation,
         }
+
+        if self._would_repeat_failure(decision.action, decision.payload, world):
+            self.memory.remember(
+                "failure",
+                f"Loop guard blocked repeated {decision.action} with unchanged world state",
+                game_id=self.game_id,
+                key="repetition_loop",
+                data={"action": decision.action, "payload": decision.payload},
+                confidence=0.95,
+                success=False,
+                importance=0.85,
+            )
+            decision.action = "observe"
+            decision.payload = {}
+            decision.reason = "Repeated failures with unchanged scene; re-observe before choosing a new strategy."
+            decision.confidence = max(decision.confidence, 0.8)
 
         if decision.confidence < 0.30 and decision.action not in {"observe", "wait"}:
             event = self._execute(
