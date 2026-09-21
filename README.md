@@ -2,6 +2,50 @@
 
 Distributed autonomous Roblox agent with a remote-capable Brain Node and a Windows Body Node.
 
+## v1.0.0 — Generic Dashboard Sessions, Multi-Instance Control, and Reliable Input
+
+v1.0 makes the Windows Body game-agnostic at startup. A Body can start with `game_id=0`, report every Roblox window it can see, be rebound to a selected PID from the dashboard, and join a Place ID chosen at runtime.
+
+Highlights:
+
+- Windows Body reports Roblox PID/HWND inventory to a remote Brain, so the Instances tab works even when the dashboard runs on Android/Linux.
+- Dashboard assignment actually rebinds the selected Body to the selected Roblox PID.
+- Human/player instances can be marked protected; changing a bound instance to player/unassigned disarms that Body.
+- Body commands are routed by `agent_id`, preventing one multi-account Body from consuming another agent's command.
+- Generic **Join Game** accepts any Roblox Place ID from the dashboard.
+- Joining a new Place ID rebuilds the perception/navigation/game-adapter stack for that game without restarting RobloxHive.
+- New guarded foreground SendInput controller is the default because Roblox often ignores background `WM_KEY*` messages.
+- Dashboard has a W/A/S/D, Jump, Interact, and Release Keys control pad for verifying real control before starting autonomous behavior.
+- Existing MM2 specialization remains available automatically when its Place ID is selected.
+
+### Recommended v1 Body startup
+
+Start Roblox/ExoPanda first, then list windows:
+
+```powershell
+python -m robloxhive body --list-windows
+```
+
+Start a generic Body on one Roblox instance:
+
+```powershell
+python -m robloxhive body `
+  --brain-url http://192.168.1.6:8765 `
+  --agent-id agent-01 `
+  --pid 16800
+```
+
+Then open **Dashboard → Instances**:
+
+1. choose the Windows Body,
+2. mark your personal Roblox window **THIS IS ME**,
+3. assign the bot window to the selected Body,
+4. test W/A/S/D,
+5. enter any Place ID and press **Join Game**.
+
+The default input mode is `auto`, which currently uses guarded foreground SendInput. Use `--input-mode message` only for experimental background control.
+
+
 ## v0.9.0 — MM2 Dataset, Witnessed-Kill Reasoning, and Predictive Aim
 
 Murder Mystery 2 is the first specialized RobloxHive game adapter. v0.9 adds the training loop required to build a dedicated visual detector and improves combat reasoning for moving targets.
