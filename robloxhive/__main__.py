@@ -6,6 +6,86 @@ import os
 from robloxhive import __version__
 
 
+def _run_single(args: argparse.Namespace) -> None:
+    if os.name != "nt":
+        raise SystemExit("RobloxHive single-bot mode is Windows-only.")
+
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise SystemExit(
+            'Single mode dependencies are missing. Install with: pip install -e ".[windows,brain]"'
+        ) from exc
+
+    from robloxhive.body.discovery import discover_roblox_windows
+    from robloxhive.body.factory import create_generic_skill_executor
+    from robloxhive.body.game_context import detect_process_game_context
+    from robloxhive.interface.single_dashboard import create_single_app
+    from robloxhive.single.runtime import SingleBotRuntime
+
+    windows = discover_roblox_windows()
+    if args.list_windows:
+        if not windows:
+            print("No Roblox windows detected.")
+            return
+        for item in windows:
+            print(f"PID={item.pid} HWND={item.hwnd} TITLE={item.title!r}")
+        return
+
+    if args.pid is not None:
+        matches = [item for item in windows if item.pid == args.pid]
+        if len(matches) != 1:
+            raise SystemExit(f"Could not find exactly one Roblox window for PID {args.pid}.")
+        instance = matches[0]
+    else:
+        if len(windows) != 1:
+            raise SystemExit(
+                "RobloxHive 1.0.0 controls exactly one bot. "
+                "Run with --list-windows, then pass the bot PID with --pid."
+            )
+        instance = windows[0]
+
+    detected = detect_process_game_context(instance.pid)
+    game_id = int(args.game_id or detected.get("place_id") or 0)
+
+    def build_executor(selected_game_id: int):
+        return create_generic_skill_executor(
+            hwnd=instance.hwnd,
+            game_id=selected_game_id,
+            template_root=args.template_root,
+            model_path=args.detector_model,
+            labels_path=args.labels,
+            enable_ocr=not args.no_ocr,
+            input_mode=args.input_mode,
+        )
+
+    executor = build_executor(game_id)
+    runtime = SingleBotRuntime(
+        executor,
+        game_id=game_id,
+        ollama_url=args.ollama_url,
+        ollama_model=args.ollama_model,
+        memory_path=args.memory,
+        decision_interval_s=args.decision_interval,
+        vision_llm=args.vision_llm,
+        executor_factory=build_executor,
+    )
+    runtime.start()
+    app = create_single_app(runtime)
+
+    print(f"RobloxHive {__version__} — Single Bot")
+    print(f"PID/HWND : {instance.pid}/{instance.hwnd}")
+    print(f"Game     : {game_id or 'unknown'}")
+    print(f"Dashboard: http://{args.host}:{args.port}")
+    print(f"Ollama   : {args.ollama_url} / {args.ollama_model}")
+    print(f"Skills   : {', '.join(executor.available())}")
+
+    try:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    finally:
+        runtime.stop()
+
+
 def _run_dashboard(args: argparse.Namespace) -> None:
     try:
         import uvicorn
@@ -132,6 +212,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="robloxhive")
     sub = parser.add_subparsers(dest="command")
 
+    run = sub.add_parser("run", help="run RobloxHive 1.0.0 as one local intelligent bot")
+    run.add_argument("--pid", type=int)
+    run.add_argument("--list-windows", action="store_true")
+    run.add_argument("--game-id", type=int, default=0)
+    run.add_argument("--host", default="127.0.0.1")
+    run.add_argument("--port", type=int, default=8765)
+    run.add_argument("--ollama-url", default=os.getenv("ROBLOXHIVE_OLLAMA_URL", "http://127.0.0.1:11434"))
+    run.add_argument("--ollama-model", default=os.getenv("ROBLOXHIVE_LLM_MODEL", "qwen2.5:3b"))
+    run.add_argument("--vision-llm", action="store_true")
+    run.add_argument("--memory", default="data/memory/robloxhive.db")
+    run.add_argument("--decision-interval", type=float, default=0.55)
+    run.add_argument(
+        "--input-mode",
+        choices=["auto", "foreground", "message"],
+        default="auto",
+    )
+    run.add_argument("--template-root", default="data/templates")
+    run.add_argument("--detector-model")
+    run.add_argument("--labels")
+    run.add_argument("--no-ocr", action="store_true")
+
     dashboard = sub.add_parser("dashboard", help="run the RobloxHive web dashboard")
     dashboard.add_argument("--host", default="127.0.0.1")
     dashboard.add_argument("--port", type=int, default=8765)
@@ -165,6 +266,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.command == "run":
+        _run_single(args)
+        return
     if args.command == "dashboard":
         _run_dashboard(args)
         return
@@ -177,7 +281,9 @@ def main() -> None:
 
     print(f"RobloxHive {__version__}")
     print("Commands:")
-    print("  python -m robloxhive dashboard")
+    print("  python -m robloxhive run --list-windows")
+    print("  python -m robloxhive run --pid <BOT_PID>")
+    print("  python -m robloxhive dashboard  # legacy distributed dashboard")
     print("  python -m robloxhive body --list-windows")
     print("  python -m robloxhive mm2-train")
 
