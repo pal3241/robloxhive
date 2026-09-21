@@ -62,6 +62,7 @@ class SingleBotRuntime:
         self.last_decision: dict[str, Any] | None = None
         self.last_result: dict[str, Any] | None = None
         self.last_world: dict[str, Any] = {}
+        self.working_memory: dict[str, Any] = {}
         self.recent_actions: deque[dict[str, Any]] = deque(maxlen=24)
         self.error_count = 0
         self.decision_count = 0
@@ -108,6 +109,7 @@ class SingleBotRuntime:
             raise ValueError("follow_player requires an exact Roblox username")
         with self._lock:
             self.goal = goal
+            self.working_memory = {}
             self.paused_reason = None
         self.memory.remember(
             "goal",
@@ -561,6 +563,7 @@ class SingleBotRuntime:
                 memories=memories,
                 map_summary=self.semantic_map.summary(),
                 recent_actions=list(self.recent_actions),
+                working_memory=dict(self.working_memory),
                 screenshot_base64=screenshot,
             )
         except Exception as exc:
@@ -579,6 +582,14 @@ class SingleBotRuntime:
         self.decision_count += 1
         self.world.apply_interpretation(decision.interpretation)
         self._remember_interpretation(decision.interpretation)
+        if decision.working_memory:
+            self.working_memory.update(
+                {
+                    str(k): v
+                    for k, v in decision.working_memory.items()
+                    if k in {"subgoal", "hypothesis", "blocked_by", "next_check"}
+                }
+            )
         self._remember_llm_items(decision.remember)
         if decision.action == "follow_player" and self.goal.get("type") == "follow_player":
             username = str(self.goal.get("target") or "").strip()
@@ -593,6 +604,7 @@ class SingleBotRuntime:
             "reason": decision.reason,
             "done": decision.done,
             "interpretation": decision.interpretation,
+            "working_memory": dict(self.working_memory),
         }
 
         if self._would_repeat_failure(decision.action, decision.payload, world):
@@ -660,6 +672,7 @@ class SingleBotRuntime:
                 "last_decision": self.last_decision,
                 "last_result": self.last_result,
                 "last_world": self.last_world,
+                "working_memory": dict(self.working_memory),
                 "recent_actions": list(self.recent_actions)[-12:],
                 "ollama": {
                     "url": self.actor.config.base_url,
