@@ -235,9 +235,11 @@ class SingleBotRuntime:
                     confidence = float(item.get("confidence", 0.55))
                 except (TypeError, ValueError):
                     confidence = 0.55
+                import hashlib
+                stable_id = hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
                 self.memory.upsert_fact(
                     kind,
-                    f"research:{section}:{index}:{abs(hash(text))}",
+                    f"research:{section}:{index}:{stable_id}",
                     text,
                     game_id=self.game_id,
                     data={
@@ -249,6 +251,14 @@ class SingleBotRuntime:
                     confidence=max(0.1, min(confidence, 0.95)),
                     importance=0.55 if not item.get("verified_in_game") else 0.8,
                 )
+                if section == "locations":
+                    self.semantic_map.observe_landmark(
+                        text[:120],
+                        kind="researched_location",
+                        confidence=max(0.1, min(confidence, 0.85)),
+                        value=0.5,
+                        metadata={"source": "internet_learning"},
+                    )
         self._knowledge_mtime[self.game_id] = mtime
 
     def _memory_query(self, world: dict[str, Any]) -> str:
