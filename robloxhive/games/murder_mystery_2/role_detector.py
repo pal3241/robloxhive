@@ -23,6 +23,8 @@ class MM2RoleDetector:
         self.stable_frames = max(1, stable_frames)
         self._history: deque[MM2Role] = deque(maxlen=self.stable_frames)
         self.current_role = MM2Role.UNKNOWN
+        self.candidate_role = MM2Role.UNKNOWN
+        self.candidate_confidence = 0.0
 
     @staticmethod
     def phase(texts: list[str]) -> RoundPhase:
@@ -55,6 +57,8 @@ class MM2RoleDetector:
 
         phase = self.phase(texts)
         if found is MM2Role.UNKNOWN:
+            self.candidate_role = MM2Role.UNKNOWN
+            self.candidate_confidence = 0.0
             if phase in {RoundPhase.LOBBY, RoundPhase.ROUND_END}:
                 self._history.clear()
                 self.current_role = MM2Role.UNKNOWN
@@ -63,12 +67,15 @@ class MM2RoleDetector:
                 return self.current_role, 0.94, RoundPhase.ROUND
             return MM2Role.UNKNOWN, 0.0, phase
 
+        self.candidate_role = found
+        self.candidate_confidence = 0.62
         self._history.append(found)
         stable = len(self._history) == self.stable_frames and len(set(self._history)) == 1
         if stable:
             self.current_role = found
-        return (
-            self.current_role if stable else found,
-            0.98 if stable else 0.62,
-            RoundPhase.ROUND if stable else RoundPhase.ROLE_REVEAL,
-        )
+            self.candidate_confidence = 0.98
+            return self.current_role, 0.98, RoundPhase.ROUND
+
+        # Safety contract: a candidate is observable through candidate_role,
+        # but detect() never returns an untrusted role as the effective role.
+        return MM2Role.UNKNOWN, 0.0, RoundPhase.ROLE_REVEAL
