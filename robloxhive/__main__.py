@@ -52,9 +52,12 @@ def _run_body(args: argparse.Namespace) -> None:
             )
         instance = windows[0]
 
+    binding = {"instance": instance}
+
     def build_executor(game_id: int):
+        current = binding["instance"]
         return create_generic_skill_executor(
-            hwnd=instance.hwnd,
+            hwnd=current.hwnd,
             game_id=game_id,
             template_root=args.template_root,
             model_path=args.model,
@@ -62,6 +65,21 @@ def _run_body(args: argparse.Namespace) -> None:
             enable_ocr=not args.no_ocr,
             input_mode=args.input_mode,
         )
+
+    def rebind_executor(pid: int, game_id: int):
+        current_windows = discover_roblox_windows()
+        matches = [item for item in current_windows if item.pid == pid]
+        if len(matches) != 1:
+            raise RuntimeError(f"Could not find exactly one Roblox window for PID {pid}.")
+        binding["instance"] = matches[0]
+        current = binding["instance"]
+        return build_executor(game_id), {
+            "pid": current.pid,
+            "hwnd": current.hwnd,
+            "title": current.title,
+            "game_id": game_id,
+            "input_backend": args.input_mode,
+        }
 
     executor = build_executor(args.game_id)
     bridge = BodyBridge(
@@ -76,6 +94,7 @@ def _run_body(args: argparse.Namespace) -> None:
             "input_backend": args.input_mode,
         },
         executor_factory=build_executor,
+        rebind_factory=rebind_executor,
     )
 
     print(f"RobloxHive Body {__version__}")
