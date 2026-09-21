@@ -555,7 +555,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.post("/api/body/control")
     def direct_control(request: DirectControlRequest) -> dict:
         node = body_nodes.get(request.agent_id)
-        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
             raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
         control_id = uuid4().hex[:12]
         direct_controls[control_id] = {
