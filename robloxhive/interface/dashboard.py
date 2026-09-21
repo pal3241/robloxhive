@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -34,7 +35,8 @@ class LearnRequest(BaseModel):
 
 
 class GoalRequest(BaseModel):
-    game_id: int = Field(gt=0)
+    agent_id: str = Field(default="agent-01", min_length=1, max_length=80)
+    game_id: int | None = Field(default=None, gt=0)
     type: str = Field(default="autonomous_progress", min_length=1, max_length=80)
     target: str | None = Field(default=None, max_length=160)
     instruction: str = Field(min_length=1, max_length=600)
@@ -56,6 +58,17 @@ class JoinGameRequest(BaseModel):
 class JoinGameResult(BaseModel):
     agent_id: str
     join_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
+class GameContextRequest(BaseModel):
+    agent_id: str = "agent-01"
+    place_id: int = Field(gt=0)
+
+
+class GameContextResult(BaseModel):
+    agent_id: str
+    context_id: str | None = None
     result: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -149,7 +162,7 @@ class MM2DatasetRequest(BaseModel):
 
 
 def create_app(data_root: str | Path = "data/games") -> FastAPI:
-    app = FastAPI(title="RobloxHive Dashboard", version="1.0.0")
+    app = FastAPI(title="RobloxHive Dashboard", version="1.0.2")
     memory = GameMemory(data_root)
     learning = LearningManager(memory)
     runtime = AgentRuntime(memory)
@@ -160,6 +173,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     navigation_probes: dict[str, dict[str, Any]] = {}
     game_controls: dict[str, dict[str, Any]] = {}
     join_requests: dict[str, dict[str, Any]] = {}
+    game_context_requests: dict[str, dict[str, Any]] = {}
     direct_controls: dict[str, dict[str, Any]] = {}
     bind_requests: dict[str, dict[str, Any]] = {}
     static_index = Path(__file__).parent / "static" / "index.html"
@@ -169,7 +183,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         items = []
         for node in body_nodes.values():
             copy = dict(node)
-            copy["online"] = now - float(copy.get("last_seen", 0)) <= 15.0
+            copy["online"] = now - float(copy.get("last_seen", 0)) <= 30.0
             items.append(copy)
         return sorted(items, key=lambda item: item.get("agent_id", ""))
 
@@ -221,13 +235,28 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     def index() -> str:
         return static_index.read_text(encoding="utf-8")
 
+    @app.websocket("/ws/dashboard")
+    async def dashboard_ws(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            while True:
+                await websocket.send_json({
+                    "type": "snapshot",
+                    "server_time": time.time(),
+                    "bodies": body_snapshot(),
+                    "instances": scan_instances(),
+                })
+                await asyncio.sleep(1.5)
+        except (WebSocketDisconnect, RuntimeError):
+            return
+
     @app.get("/api/health")
     def health() -> dict:
         active = runtime.get_plan()
         online_bodies = sum(1 for body in body_snapshot() if body["online"])
         return {
             "ok": True,
-            "version": "1.0.0",
+            "version": "1.0.2",
             "synthesizer": getattr(learning.synthesizer, "name", "unknown"),
             "active_plan": active.id if active else None,
             "online_bodies": online_bodies,
@@ -330,21 +359,53 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
 
     @app.post("/api/agent/goals")
     def start_goal(request: GoalRequest) -> dict:
-        knowledge = memory.load_knowledge(request.game_id)
-        if not knowledge:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+
+        metadata = node.get("metadata") or {}
+        if not metadata.get("armed"):
             raise HTTPException(
                 status_code=409,
-                detail="Game knowledge is empty. Learn/synthesize this game first.",
+                detail="Selected Body is not armed. Assign a bot window in Instances first.",
             )
+
+        game_id = int(
+            request.game_id
+            or metadata.get("place_id")
+            or metadata.get("game_id")
+            or 0
+        )
+        if game_id <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail="Current game is unknown. Set the Place ID or attach the current game first.",
+            )
+
+        goal_metadata = {
+            "instruction": request.instruction,
+            "agent_id": request.agent_id,
+        }
+        if request.type == "follow_player":
+            if not request.target or not request.target.strip():
+                raise HTTPException(status_code=400, detail="Username is required for follow_player")
+            goal_metadata["username"] = request.target.strip()
+
         goal = Goal(
             type=request.type,
-            target=request.target,
+            target=request.target.strip() if request.target else None,
             priority=request.priority,
             persistent=request.persistent,
-            metadata={"instruction": request.instruction},
+            metadata=goal_metadata,
         )
-        plan = runtime.start_goal(request.game_id, goal)
-        return plan.model_dump(mode="json")
+        # Empty knowledge is allowed: the planner falls back to observation and
+        # direct goal skills instead of making the Agent tab unusable.
+        plan = runtime.start_goal(game_id, goal)
+        return {
+            **plan.model_dump(mode="json"),
+            "agent_id": request.agent_id,
+            "knowledge_available": bool(memory.load_knowledge(game_id)),
+        }
 
     @app.get("/api/agent/active-plan")
     def active_plan() -> dict | None:
@@ -390,6 +451,59 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
             payload={"join_id": join_id, "agent_id": request.agent_id, "place_id": request.place_id},
         ))
         return join_requests[join_id]
+
+    @app.post("/api/body/game-context")
+    def set_game_context(request: GameContextRequest) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
+            raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
+        context_id = uuid4().hex[:12]
+        game_context_requests[context_id] = {
+            "context_id": context_id,
+            "agent_id": request.agent_id,
+            "place_id": request.place_id,
+            "status": "queued",
+            "created_at": time.time(),
+        }
+        runtime.commands.publish(Command(
+            source="dashboard",
+            type="SET_GAME_CONTEXT",
+            payload={
+                "context_id": context_id,
+                "agent_id": request.agent_id,
+                "place_id": request.place_id,
+            },
+        ))
+        return game_context_requests[context_id]
+
+    @app.get("/api/body/game-contexts")
+    def get_game_context_requests() -> list[dict[str, Any]]:
+        return sorted(
+            game_context_requests.values(),
+            key=lambda item: item.get("created_at", 0),
+            reverse=True,
+        )[:30]
+
+    @app.post("/api/body/game-context-results")
+    def game_context_result(request: GameContextResult) -> dict:
+        node = body_nodes.get(request.agent_id)
+        if node:
+            node["last_seen"] = time.time()
+            if request.result.get("ok"):
+                node["metadata"] = {
+                    **(node.get("metadata") or {}),
+                    "game_id": request.result.get("game_id"),
+                    "place_id": request.result.get("place_id"),
+                    "game_context_source": "dashboard",
+                }
+        if request.context_id and request.context_id in game_context_requests:
+            game_context_requests[request.context_id].update(
+                status="complete" if request.result.get("ok") else "failed",
+                result=request.result,
+                finished_at=time.time(),
+            )
+            return game_context_requests[request.context_id]
+        return {"status": "orphan_result", "result": request.result}
 
     @app.get("/api/body/joins")
     def get_join_requests() -> list[dict[str, Any]]:
@@ -639,17 +753,30 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
 
     @app.get("/api/games/mm2/status")
     def mm2_status() -> list[dict[str, Any]]:
+        from robloxhive.games.murder_mystery_2 import OFFICIAL_PLACE_ID
+
         rows = []
         for node in body_snapshot():
-            game = node.get("metadata", {}).get("game", {})
-            if game.get("adapter") == "murder_mystery_2":
+            metadata = node.get("metadata", {})
+            game = metadata.get("game", {})
+            game_id = int(metadata.get("place_id") or metadata.get("game_id") or 0)
+            adapter_ready = game.get("adapter") == "murder_mystery_2"
+            if adapter_ready or game_id == OFFICIAL_PLACE_ID:
                 rows.append({
                     "agent_id": node.get("agent_id"),
                     "online": node.get("online", False),
-                    "pid": node.get("metadata", {}).get("pid"),
-                    "hwnd": node.get("metadata", {}).get("hwnd"),
-                    "game_id": node.get("metadata", {}).get("game_id"),
-                    "state": game,
+                    "armed": bool(metadata.get("armed")),
+                    "pid": metadata.get("pid"),
+                    "hwnd": metadata.get("hwnd"),
+                    "game_id": game_id,
+                    "adapter_ready": adapter_ready,
+                    "state": game if adapter_ready else {
+                        "adapter": None,
+                        "enabled": False,
+                        "role": "unknown",
+                        "phase": "unknown",
+                        "diagnostics": {"waiting_for_adapter": True},
+                    },
                 })
         return rows
 
