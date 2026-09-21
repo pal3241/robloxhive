@@ -711,20 +711,27 @@ async function loadSkillTests(){
 async function loadPerceptionNodes(){
   const root=$('#perceptionNodes'), select=$('#perceptionAgent');
   try{
-    const nodes=await api('/api/body/nodes');
-    root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Body terhubung.</p>';
-    select.innerHTML='<option value="">Pilih Body...</option>';
-    nodes.forEach(n=>{
-      const p=n.metadata?.perception||{};
-      const div=document.createElement('div');div.className='item';
-      div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+(n.online?'online':'offline')+'</span>'+
-        '<div class="meta">Adapters: '+esc((p.adapters||[]).join(' → ')||'-')+'</div>'+
-        '<div class="meta">ONNX: '+esc(n.metadata?.onnx_enabled?'ON':'OFF')+' · OCR: '+esc(n.metadata?.ocr_available?'ON':'OFF')+' · template: '+esc(n.metadata?.template_fallback?'ON':'OFF')+'</div>'+
-        '<div class="meta">Model: '+esc(n.metadata?.model_path||'-')+'</div>'+
-        '<div class="meta">Last source: '+esc(p.last_source||'-')+' · frame '+esc((p.frame_size||[]).join('×')||'-')+'</div>';
-      root.appendChild(div);
-      if(n.online){const o=document.createElement('option');o.value=n.agent_id;o.textContent=n.agent_id;select.appendChild(o)}
-    });
+    const nodes=await getBodies();
+    const signature=JSON.stringify(nodes.map(n=>[n.agent_id,n.online,n.metadata?.onnx_enabled,n.metadata?.ocr_available,n.metadata?.model_path,n.metadata?.perception]));
+    if(root.dataset.signature!==signature){
+      root.dataset.signature=signature;
+      root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Body terhubung.</p>';
+      nodes.forEach(n=>{
+        const p=n.metadata?.perception||{};
+        const div=document.createElement('div');div.className='item';
+        div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+(n.online?'online':'offline')+'</span>'+
+          '<div class="meta">Adapters: '+esc((p.adapters||[]).join(' → ')||'-')+'</div>'+
+          '<div class="meta">ONNX: '+esc(n.metadata?.onnx_enabled?'ON':'OFF')+' · OCR: '+esc(n.metadata?.ocr_available?'ON':'OFF')+' · username follow: '+esc(n.metadata?.username_follow||'-')+'</div>'+
+          '<div class="meta">Model: '+esc(n.metadata?.model_path||'-')+'</div>'+
+          '<div class="meta">Last source: '+esc(p.last_source||'-')+' · frame '+esc((p.frame_size||[]).join('×')||'-')+'</div>';
+        root.appendChild(div);
+      });
+    }
+    syncSelect(
+      select,
+      nodes.filter(n=>n.online).map(n=>({value:n.agent_id,label:n.agent_id})),
+      'Pilih Body...'
+    );
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
 }
 $('#refreshPerception').onclick=()=>{loadPerceptionNodes();loadPerceptionProbes()};
@@ -760,33 +767,27 @@ async function loadPerceptionProbes(){
 async function loadNavigationNodes(){
   const root=$('#navigationNodes'), select=$('#navigationAgent');
   try{
-    const nodes=await api('/api/body/nodes');
-    root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Body terhubung.</p>';
-    select.innerHTML='<option value="">Pilih Body...</option>';
-    nodes.forEach(n=>{
-      const nav=n.metadata?.navigation||{};
-      const stats=nav.stats||{};
-      const div=document.createElement('div');div.className='item';
-      div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+(n.online?'online':'offline')+'</span>'+
-        '<div class="meta">Navigation: '+esc(nav.available===false?'OFF':'ON')+' · result '+esc(stats.last_result||'-')+'</div>'+
-        '<div class="meta">Replans '+esc(stats.replans||0)+' · stuck '+esc(stats.stuck_events||0)+' · recoveries '+esc(stats.recoveries||0)+' · motion '+esc(stats.last_motion_score||0)+'</div>';
-      root.appendChild(div);
-      if(n.online){const o=document.createElement('option');o.value=n.agent_id;o.textContent=n.agent_id;select.appendChild(o)}
-    });
+    const nodes=await getBodies();
+    const signature=JSON.stringify(nodes.map(n=>[n.agent_id,n.online,n.metadata?.navigation]));
+    if(root.dataset.signature!==signature){
+      root.dataset.signature=signature;
+      root.innerHTML=nodes.length?'':'<p class="muted">Belum ada Body terhubung.</p>';
+      nodes.forEach(n=>{
+        const nav=n.metadata?.navigation||{};
+        const stats=nav.stats||{};
+        const div=document.createElement('div');div.className='item';
+        div.innerHTML='<b>'+esc(n.agent_id)+'</b> <span class="pill '+(n.online?'ok':'bad')+'">'+(n.online?'online':'offline')+'</span>'+
+          '<div class="meta">Navigation: '+esc(nav.available===false?'OFF':'ON')+' · result '+esc(stats.last_result||'-')+'</div>'+
+          '<div class="meta">Replans '+esc(stats.replans||0)+' · stuck '+esc(stats.stuck_events||0)+' · recoveries '+esc(stats.recoveries||0)+'</div>';
+        root.appendChild(div);
+      });
+    }
+    syncSelect(
+      select,
+      nodes.filter(n=>n.online).map(n=>({value:n.agent_id,label:n.agent_id})),
+      'Pilih Body...'
+    );
   }catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}
-}
-function renderNavigationResult(result){
-  if(!result){$('#navigationMap').textContent='Belum ada map.';$('#navigationStats').innerHTML='<p class="muted">Belum ada data.</p>';return}
-  const map=(result.map||[]).join('\n');
-  $('#navigationMap').textContent=map||'Map belum terbentuk. Jalankan navigate terlebih dahulu.';
-  const s=result.stats||{};
-  $('#navigationStats').innerHTML=
-    '<div class="item"><b>Result</b><div class="meta">'+esc(result.reason||s.last_result||'-')+'</div></div>'+
-    '<div class="item"><b>Goal cell</b><div class="meta">'+esc(JSON.stringify(result.goal_cell||null))+'</div></div>'+
-    '<div class="item"><b>Path length</b><div class="meta">'+esc((result.path||[]).length)+'</div></div>'+
-    '<div class="item"><b>Replans</b><div class="meta">'+esc(s.replans||0)+'</div></div>'+
-    '<div class="item"><b>Stuck / Recovery</b><div class="meta">'+esc(s.stuck_events||0)+' / '+esc(s.recoveries||0)+'</div></div>'+
-    '<div class="item"><b>Motion score</b><div class="meta">'+esc(s.last_motion_score||0)+'</div></div>';
 }
 $('#refreshNavigation').onclick=()=>{loadNavigationNodes();loadNavigationProbes()};
 $('#navigationProbeForm').addEventListener('submit',async e=>{
