@@ -80,6 +80,17 @@ class MM2SceneReader:
                     )
                 )
 
+        w, h = frame_size
+        if w > 0 and h > 0 and players:
+            self_candidates = [
+                p for p in players
+                if abs(p.detection.center_x / w - 0.5) <= 0.22
+                and (p.detection.y + p.detection.height) / h >= 0.62
+            ]
+            if self_candidates:
+                own = max(self_candidates, key=lambda p: p.detection.area)
+                own.is_self = True
+
         knives = [d for d in detections if d.label.lower() in KNIFE_LABELS]
         guns = [d for d in detections if d.label.lower() in GUN_LABELS]
         bodies = [d for d in detections if d.label.lower() in BODY_LABELS]
