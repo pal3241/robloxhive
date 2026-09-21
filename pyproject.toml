@@ -31,7 +31,9 @@ brain = [
   "uvicorn>=0.30",
   "websockets>=13",
   "aiosqlite>=0.20",
-  "ddgs>=9.16,<10; platform_system != \"Android\"",
+]
+research = [
+  "ddgs>=9.16,<10",
 ]
 all = [
   "fastapi>=0.115",
