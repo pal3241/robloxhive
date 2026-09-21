@@ -34,9 +34,11 @@ class SingleBotRuntime:
         decision_interval_s: float = 0.55,
         vision_llm: bool = False,
         executor_factory: Any | None = None,
+        game_context_provider: Any | None = None,
     ) -> None:
         self.executor = executor
         self.executor_factory = executor_factory
+        self.game_context_provider = game_context_provider
         self.game_id = int(game_id or 0)
         self.memory = CognitiveMemory(memory_path)
         self.semantic_map = SemanticMap(self.memory, self.game_id)
@@ -69,6 +71,7 @@ class SingleBotRuntime:
         self._lock = threading.RLock()
         self._last_tick = 0.0
         self._knowledge_mtime: dict[int, float] = {}
+        self._last_game_context_check = 0.0
 
     def start(self) -> None:
         if self.running:
@@ -263,6 +266,65 @@ class SingleBotRuntime:
             if x
         )
 
+    def _refresh_game_context(self) -> None:
+        if self.game_context_provider is None:
+            return
+        now = time.monotonic()
+        if now - self._last_game_context_check < 3.0:
+            return
+        self._last_game_context_check = now
+        try:
+            context = self.game_context_provider() or {}
+            place_id = int(context.get("place_id") or 0)
+        except Exception:
+            return
+        if place_id > 0 and place_id != self.game_id:
+            self.set_game_id(place_id)
+
+    def _remember_interpretation(self, interpretation: dict[str, Any]) -> None:
+        roles = interpretation.get("roles")
+        if isinstance(roles, dict):
+            for subject, role in roles.items():
+                self.memory.upsert_fact(
+                    "role",
+                    str(subject),
+                    f"{subject} role is {role}",
+                    game_id=self.game_id,
+                    data={"subject": subject, "role": role, "source": "ollama_world_interpretation"},
+                    confidence=0.65,
+                    importance=0.7,
+                )
+        teams = interpretation.get("teams")
+        if isinstance(teams, dict):
+            for team, members in teams.items():
+                if not isinstance(members, list):
+                    continue
+                for member in members:
+                    self.memory.relate(
+                        str(member),
+                        "member_of_team",
+                        str(team),
+                        game_id=self.game_id,
+                        confidence=0.6,
+                    )
+        for relation_name, kind in (("enemies", "enemy"), ("allies", "team")):
+            values = interpretation.get(relation_name)
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                text = str(value).strip()
+                if not text:
+                    continue
+                self.memory.upsert_fact(
+                    kind,
+                    text.lower(),
+                    f"{text} classified as {relation_name[:-1]}",
+                    game_id=self.game_id,
+                    data={"relation": relation_name, "source": "ollama_world_interpretation"},
+                    confidence=0.6,
+                    importance=0.75 if kind == "enemy" else 0.6,
+                )
+
     def _remember_llm_items(self, items: list[dict[str, Any]]) -> None:
         for item in items:
             kind = str(item.get("kind") or "episodic").lower()
@@ -285,6 +347,17 @@ class SingleBotRuntime:
                 confidence=confidence,
                 importance=importance,
             )
+            if kind == "map":
+                name = str(item.get("key") or text).strip()
+                if name:
+                    self.semantic_map.observe_landmark(
+                        name,
+                        kind=str(item.get("map_kind") or "unknown"),
+                        confidence=confidence,
+                        danger=float(item.get("danger") or 0.0),
+                        value=float(item.get("value") or importance),
+                        metadata={"source": "ollama_interpretation"},
+                    )
 
     def _record_result(self, action: str, payload: dict[str, Any], result: Any, reason: str) -> dict[str, Any]:
         if hasattr(result, "model_dump"):
@@ -308,6 +381,23 @@ class SingleBotRuntime:
         }
         self.recent_actions.append(event)
         self.last_result = row
+        target = str(payload.get("target") or payload.get("label") or "").strip()
+        previous_landmark = self.semantic_map.current
+        if success and action in {"navigate", "collect", "interact"} and target:
+            self.semantic_map.observe_landmark(
+                target,
+                kind="objective" if action == "navigate" else "interaction",
+                confidence=0.72,
+                value=0.55,
+                metadata={"last_action": action},
+            )
+            if previous_landmark and previous_landmark != target.lower():
+                self.semantic_map.transition(
+                    previous_landmark,
+                    target,
+                    seconds=max(0.05, float(row.get("duration_ms") or 0) / 1000.0),
+                    success=True,
+                )
         self.memory.remember(
             "action" if success else "failure",
             f"{action}: {'success' if success else 'failed'}",
@@ -334,6 +424,7 @@ class SingleBotRuntime:
         if not self.enabled or self.goal.get("type") == "idle":
             return
 
+        self._refresh_game_context()
         self._sync_legacy_knowledge()
         snapshot = self.world.observe()
         world = snapshot.compact()
@@ -368,6 +459,7 @@ class SingleBotRuntime:
         self.paused_reason = None
         self.decision_count += 1
         self.world.apply_interpretation(decision.interpretation)
+        self._remember_interpretation(decision.interpretation)
         self._remember_llm_items(decision.remember)
         self.last_decision = {
             "action": decision.action,
