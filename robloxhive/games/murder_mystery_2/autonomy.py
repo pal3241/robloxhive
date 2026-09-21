@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from robloxhive.games.murder_mystery_2.combat import MM2Combat
+from robloxhive.games.murder_mystery_2.event_reasoning import WitnessedKillReasoner
 from robloxhive.games.murder_mystery_2.models import MM2Role, MM2State, RoundPhase
 from robloxhive.games.murder_mystery_2.role_detector import MM2RoleDetector
 from robloxhive.games.murder_mystery_2.scene import MM2SceneReader
@@ -30,6 +31,7 @@ class MM2Autonomy:
         self.scene_reader = MM2SceneReader(perception)
         self.role_detector = MM2RoleDetector(stable_frames=2)
         self.threats = MM2ThreatModel()
+        self.kill_reasoner = WitnessedKillReasoner()
         self.survival = MM2Survival(input_backend)
         self.combat = MM2Combat(input_backend)
         self.state = MM2State(enabled=True)
@@ -71,6 +73,7 @@ class MM2Autonomy:
 
         scene = self.scene_reader.observe()
         self.threats.update(scene)
+        kill_events = self.kill_reasoner.update(scene, self.threats)
 
         detected_role, role_confidence, phase = self.role_detector.detect(scene.ui_text)
 
@@ -170,6 +173,9 @@ class MM2Autonomy:
             "dropped_guns_visible": len(scene.dropped_guns),
             "bodies_visible": len(scene.bodies),
             "ui_text_sample": scene.ui_text[:12],
+            "kill_events_recent": self.kill_reasoner.recent(),
+            "threat_evidence_recent": list(self.threats.evidence_log)[-10:],
+            "new_kill_events": len(kill_events),
         }
         return self.status()
 
