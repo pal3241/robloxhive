@@ -20,6 +20,7 @@ class SkillExecutor:
         self.game_adapter: Any | None = None
         self.input_backend: Any | None = None
         self.background_input_backend: Any | None = None
+        self.frame_source: Any | None = None
 
     def register(self, name: str, handler: SkillHandler) -> None:
         self._handlers[name] = handler
@@ -48,8 +49,15 @@ class SkillExecutor:
     def available(self) -> list[str]:
         return sorted(self._handlers)
 
-    def attach_perception(self, perception: Any, metadata: dict[str, Any] | None = None) -> None:
+    def attach_perception(
+        self,
+        perception: Any,
+        metadata: dict[str, Any] | None = None,
+        frame_source: Any | None = None,
+    ) -> None:
         self.perception = perception
+        if frame_source is not None:
+            self.frame_source = frame_source
         if metadata:
             self.metadata.update(metadata)
 
