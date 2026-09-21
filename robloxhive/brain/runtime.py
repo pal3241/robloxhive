@@ -163,5 +163,7 @@ class AgentRuntime:
         if changed:
             self.memory.save_knowledge(game_id, knowledge)
 
-    def next_command(self, timeout: float | None = None) -> Command | None:
+    def next_command(self, timeout: float | None = None, agent_id: str | None = None) -> Command | None:
+        if agent_id:
+            return self.commands.receive_for(agent_id, timeout=timeout)
         return self.commands.receive(timeout=timeout)
