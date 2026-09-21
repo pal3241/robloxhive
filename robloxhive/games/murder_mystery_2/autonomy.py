@@ -82,7 +82,8 @@ class MM2Autonomy:
             return {
                 "ok": True,
                 "sample": self.dataset.get_sample(sample_id),
-                "preview": self.dataset.preview_data_url(sample_id),
+                "preview": self.dataset.preview_data_url(sample_id, draw_boxes=True),
+                "raw_preview": self.dataset.preview_data_url(sample_id, draw_boxes=False),
             }
         elif action == "dataset_approve":
             if self.dataset is None:
