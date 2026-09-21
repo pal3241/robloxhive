@@ -56,10 +56,11 @@ class MM2Autonomy:
         if not scene.players:
             return None
         # Sheriff/gun holder first; then the visually nearest/largest target.
-        gun_holders = [p for p in scene.players if p.has_gun]
+        others = [p for p in scene.players if not p.is_self]
+        gun_holders = [p for p in others if p.has_gun]
         if gun_holders:
             return max(gun_holders, key=lambda p: p.detection.area)
-        return max(scene.players, key=lambda p: p.detection.area)
+        return max(others, key=lambda p: p.detection.area) if others else None
 
     def tick(self) -> dict[str, Any]:
         now = time.monotonic()
@@ -72,6 +73,15 @@ class MM2Autonomy:
         self.threats.update(scene)
 
         detected_role, role_confidence, phase = self.role_detector.detect(scene.ui_text)
+
+        # Visual self-weapon evidence is a fallback when OCR role text is unavailable.
+        own = next((p for p in scene.players if p.is_self), None)
+        if detected_role is MM2Role.UNKNOWN and own is not None:
+            if own.has_knife:
+                detected_role, role_confidence, phase = MM2Role.MURDERER, 0.90, RoundPhase.ROUND
+            elif own.has_gun:
+                detected_role, role_confidence, phase = MM2Role.SHERIFF, 0.84, RoundPhase.ROUND
+
         role = self.state.role_override or detected_role
         self.state.role = role
         self.state.role_confidence = 1.0 if self.state.role_override else role_confidence
@@ -83,13 +93,18 @@ class MM2Autonomy:
         self.state.murderer_confidence = murderer.murderer_confidence if murderer else 0.0
         self.state.sheriff_track_id = sheriff.track_id if sheriff else None
 
-        # Always-on survival for non-murderer roles; also conservative while role unknown.
-        if role is not MM2Role.MURDERER and murderer is not None:
-            moved, reason = self.survival.evade(murderer, scene)
+        # Survival always runs before offense.
+        survival_threat = sheriff if role is MM2Role.MURDERER else murderer
+        if survival_threat is not None:
+            moved, reason = self.survival.evade(survival_threat, scene)
             if moved:
                 self.state.mode = "survival"
                 self.state.last_action = reason
-                self.state.last_reason = "visible_murderer_too_close"
+                self.state.last_reason = (
+                    "visible_sheriff_too_close"
+                    if role is MM2Role.MURDERER
+                    else "visible_murderer_too_close"
+                )
                 self.state.survival_moves += 1
                 return self._finish(scene)
 
