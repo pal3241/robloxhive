@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -22,12 +22,14 @@ class BodyBridge:
         agent_id: str = "agent-01",
         timeout: float = 10.0,
         metadata: dict[str, Any] | None = None,
+        executor_factory: Callable[[int], SkillExecutor] | None = None,
     ) -> None:
         self.brain_url = brain_url.rstrip("/")
         self.executor = executor
         self.agent_id = agent_id
         self.timeout = timeout
         self.metadata = metadata or {}
+        self.executor_factory = executor_factory
         self.running = False
         self._last_register = 0.0
 
@@ -124,16 +126,48 @@ class BodyBridge:
                 result = {"ok": False, "error": "JOIN_GAME_WINDOWS_ONLY"}
             else:
                 try:
+                    # Roblox protocol launch is intentionally generic: the
+                    # dashboard chooses the place at runtime instead of binding
+                    # a Body to one game in the CLI.
                     os.startfile(f"roblox://placeID={place_id}")
-                    result = {"ok": True, "place_id": place_id, "status": "launch_requested"}
-                except OSError as exc:
-                    result = {"ok": False, "error": str(exc), "place_id": place_id}
+                    reconfigured = False
+                    if self.executor_factory is not None:
+                        self.executor = self.executor_factory(place_id)
+                        self.metadata["game_id"] = place_id
+                        reconfigured = True
+                    self.register(force=True)
+                    result = {
+                        "ok": True,
+                        "place_id": place_id,
+                        "status": "launch_requested",
+                        "executor_reconfigured": reconfigured,
+                    }
+                except Exception as exc:
+                    result = {
+                        "ok": False,
+                        "error": type(exc).__name__,
+                        "message": str(exc),
+                        "place_id": place_id,
+                    }
             self._json(
                 "/api/body/join-results",
                 method="POST",
                 payload={
                     "agent_id": self.agent_id,
                     "join_id": payload.get("join_id"),
+                    "result": result,
+                },
+            )
+            return command
+
+        if command.get("type") == "DIRECT_INPUT":
+            result = self.executor.direct_control(payload)
+            self._json(
+                "/api/body/control-results",
+                method="POST",
+                payload={
+                    "agent_id": self.agent_id,
+                    "control_id": payload.get("control_id"),
                     "result": result,
                 },
             )
