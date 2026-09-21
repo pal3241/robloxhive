@@ -60,6 +60,15 @@ class Win32MessageInput:
     def interact(self, key: str = "interact") -> None:
         self.key(key, 0.06)
 
+    def aim_client(self, x: int, y: int) -> None:
+        try:
+            import win32api
+            import win32con
+        except ImportError as exc:
+            raise RuntimeError("Win32MessageInput requires pywin32") from exc
+        lparam = win32api.MAKELONG(max(0, x), max(0, y))
+        self._post(win32con.WM_MOUSEMOVE, 0, lparam)
+
     def click_client(self, x: int, y: int, button: str = "left") -> None:
         try:
             import win32api
