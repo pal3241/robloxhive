@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -125,6 +126,39 @@ class WorldModel:
             snapshot.game = self.executor.game_status()
         except Exception:
             snapshot.game = {}
+
+        joined_ui = " | ".join(snapshot.ui_text)
+        role_match = re.search(
+            r"(?i)\byou\s+are(?:\s+the)?\s+([a-z][a-z0-9 _-]{1,28})",
+            joined_ui,
+        )
+        if role_match:
+            role = role_match.group(1).strip(" .!:-").lower()
+            if role:
+                snapshot.roles["self"] = role
+
+        team_patterns = (
+            r"(?i)\bteam\s*[:=-]\s*([a-z0-9 _-]{2,24})",
+            r"(?i)\byou\s+are\s+on\s+(?:the\s+)?([a-z0-9 _-]{2,24})\s+team\b",
+        )
+        for pattern in team_patterns:
+            match = re.search(pattern, joined_ui)
+            if match:
+                team = match.group(1).strip(" .!:-").lower()
+                if team:
+                    snapshot.teams.setdefault(team, []).append("self")
+                    break
+
+        for entity in snapshot.entities:
+            label = str(entity.get("label") or "").lower()
+            track_id = entity.get("track_id")
+            ref = f"track:{track_id}" if track_id is not None else label
+            if any(token in label for token in ("enemy", "hostile", "opponent")) and ref:
+                if ref not in snapshot.enemies:
+                    snapshot.enemies.append(ref)
+            if any(token in label for token in ("ally", "teammate", "friendly")) and ref:
+                if ref not in snapshot.allies:
+                    snapshot.allies.append(ref)
 
         game = snapshot.game or {}
         if game.get("adapter") == "murder_mystery_2":
