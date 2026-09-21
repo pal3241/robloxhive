@@ -45,6 +45,7 @@ class MM2SceneSnapshot:
     players: list[PlayerObservation] = field(default_factory=list)
     knives: list[Detection] = field(default_factory=list)
     guns: list[Detection] = field(default_factory=list)
+    dropped_guns: list[Detection] = field(default_factory=list)
     bodies: list[Detection] = field(default_factory=list)
     ui_text: list[str] = field(default_factory=list)
     raw_detections: list[Detection] = field(default_factory=list)
