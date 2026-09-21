@@ -27,10 +27,17 @@ def discover_roblox_windows() -> list[RobloxInstance]:
     instances: list[RobloxInstance] = []
 
     def callback(hwnd: int, _extra: object) -> bool:
-        if not win32gui.IsWindow(hwnd):
+        if not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd):
             return True
+
+        # EnumWindows can surface IME/helper windows owned by RobloxPlayerBeta.
+        # They share the Roblox PID but are not controllable game windows.
         title = win32gui.GetWindowText(hwnd).strip()
         if not title:
+            return True
+        if title.lower() in {"default ime", "msctfime ui"}:
+            return True
+        if win32gui.GetParent(hwnd):
             return True
 
         try:
@@ -41,6 +48,15 @@ def discover_roblox_windows() -> list[RobloxInstance]:
             return True
 
         if "roblox" not in process_name:
+            return True
+
+        # The actual Roblox render window has a normal non-empty client area.
+        # Reject zero/tiny helper surfaces defensively.
+        try:
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        except OSError:
+            return True
+        if (right - left) < 160 or (bottom - top) < 120:
             return True
 
         instances.append(
