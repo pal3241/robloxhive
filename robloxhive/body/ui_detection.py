@@ -75,6 +75,22 @@ class UiTextDetector:
             )
         return out
 
+    def find_exact(self, text: str) -> Detection | None:
+        wanted = re.sub(r"[^a-z0-9_]", "", text.strip().lower().lstrip("@"))
+        if not wanted:
+            return None
+        matches = []
+        for det in self.scan():
+            candidate = re.sub(r"[^a-z0-9_]", "", str(det.label).strip().lower().lstrip("@"))
+            if candidate == wanted:
+                matches.append(det)
+        if not matches:
+            return None
+        hit = max(matches, key=lambda d: d.confidence)
+        hit.metadata["username_verified"] = True
+        hit.metadata["tracking_mode"] = "nameplate_ocr_only"
+        return hit
+
     def find(self, label: str) -> Detection | None:
         wanted = self._norm(label)
         if not wanted:
