@@ -22,6 +22,7 @@ class MM2RoleDetector:
     def __init__(self, stable_frames: int = 2) -> None:
         self.stable_frames = max(1, stable_frames)
         self._history: deque[MM2Role] = deque(maxlen=self.stable_frames)
+        self.current_role = MM2Role.UNKNOWN
 
     @staticmethod
     def phase(texts: list[str]) -> RoundPhase:
@@ -56,8 +57,18 @@ class MM2RoleDetector:
         if found is MM2Role.UNKNOWN:
             if phase in {RoundPhase.LOBBY, RoundPhase.ROUND_END}:
                 self._history.clear()
+                self.current_role = MM2Role.UNKNOWN
+                return MM2Role.UNKNOWN, 0.0, phase
+            if self.current_role is not MM2Role.UNKNOWN:
+                return self.current_role, 0.94, RoundPhase.ROUND
             return MM2Role.UNKNOWN, 0.0, phase
 
         self._history.append(found)
         stable = len(self._history) == self.stable_frames and len(set(self._history)) == 1
-        return (found, 0.98 if stable else 0.62, RoundPhase.ROUND if stable else RoundPhase.ROLE_REVEAL)
+        if stable:
+            self.current_role = found
+        return (
+            self.current_role if stable else found,
+            0.98 if stable else 0.62,
+            RoundPhase.ROUND if stable else RoundPhase.ROLE_REVEAL,
+        )
