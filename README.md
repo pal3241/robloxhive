@@ -45,6 +45,18 @@ Then open **Dashboard → Instances**:
 
 The default input mode is `auto`, which currently uses guarded foreground SendInput. Use `--input-mode message` only for experimental background control.
 
+For Termux/Android, install the Brain without native search dependencies:
+
+```bash
+pip install -e ".[brain]"
+```
+
+Internet research is optional and can be added separately on platforms where `ddgs` installs cleanly:
+
+```bash
+pip install -e ".[research]"
+```
+
 
 ## v0.9.0 — MM2 Dataset, Witnessed-Kill Reasoning, and Predictive Aim
 
