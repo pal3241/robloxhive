@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from robloxhive.brain.learning import LearningManager
 from robloxhive.brain.memory import GameMemory
+from robloxhive.brain.synthesis import HeuristicKnowledgeSynthesizer, OllamaKnowledgeSynthesizer
 from robloxhive.single.runtime import SingleBotRuntime
 
 
@@ -56,11 +57,41 @@ class MemorySearchRequest(BaseModel):
     limit: int = Field(default=20, ge=1, le=64)
 
 
+class RuntimeKnowledgeSynthesizer:
+    """Use the same Ollama endpoint/model currently configured in the dashboard."""
+
+    def __init__(self, runtime: SingleBotRuntime) -> None:
+        self.runtime = runtime
+        self.fallback = HeuristicKnowledgeSynthesizer()
+
+    @property
+    def name(self) -> str:
+        cfg = self.runtime.actor.config
+        return f"ollama:{cfg.model}"
+
+    def synthesize(self, game_name: str, bundle: dict[str, Any]) -> dict[str, Any]:
+        cfg = self.runtime.actor.config
+        try:
+            return OllamaKnowledgeSynthesizer(
+                cfg.model,
+                cfg.base_url,
+                timeout=max(90, int(cfg.timeout_s * 3)),
+            ).synthesize(game_name, bundle)
+        except RuntimeError as exc:
+            result = self.fallback.synthesize(game_name, bundle)
+            result["synthesizer"] = "heuristic-fallback"
+            result["synthesis_warning"] = str(exc)
+            return result
+
+
 def create_single_app(runtime: SingleBotRuntime) -> FastAPI:
     app = FastAPI(title="RobloxHive 1.0.0", version="1.0.0")
     static_index = Path(__file__).parent / "static" / "single.html"
     learning_memory = GameMemory("data/games")
-    learning = LearningManager(learning_memory)
+    learning = LearningManager(
+        learning_memory,
+        synthesizer=RuntimeKnowledgeSynthesizer(runtime),
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
