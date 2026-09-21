@@ -31,6 +31,7 @@ class WitnessedKillReasoner:
 
     def __init__(self) -> None:
         self._previous_bodies: list[Detection] = []
+        self._initialized = False
         self.events: deque[KillEvent] = deque(maxlen=24)
 
     def _is_new_body(self, body: Detection) -> bool:
@@ -39,6 +40,11 @@ class WitnessedKillReasoner:
         return all(_center_distance(body, old) > max(body.width, body.height, 45.0) * 0.65 for old in self._previous_bodies)
 
     def update(self, scene: MM2SceneSnapshot, threats: MM2ThreatModel) -> list[KillEvent]:
+        if not self._initialized:
+            self._previous_bodies = list(scene.bodies)
+            self._initialized = True
+            return []
+
         new_events: list[KillEvent] = []
         w, h = scene.frame_size
         max_distance = max(80.0, math.hypot(w, h) * 0.18) if w > 0 and h > 0 else 160.0
