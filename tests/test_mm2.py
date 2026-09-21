@@ -264,6 +264,14 @@ class MM2Tests(unittest.TestCase):
         self.assertEqual(track_ids[1:], [-1, -2])
         self.assertEqual(len(set(track_ids)), 3)
 
+        # Synthetic IDs are one-shot and must not be reused on later frames,
+        # otherwise persistent threat evidence could jump to another player.
+        reader._detections = lambda: [
+            Detection("player", 0.9, 320, 20, 50, 80, source="test", track_id=None)
+        ]
+        next_scene = reader.observe()
+        self.assertEqual(next_scene.players[0].track_id, -3)
+
 
 if __name__ == "__main__":
     unittest.main()
