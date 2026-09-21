@@ -77,4 +77,22 @@ def create_generic_skill_executor(
     skills.register_into(executor)
     executor.attach_perception(perception, metadata)
     executor.attach_navigation(navigator)
+
+    try:
+        numeric_game_id = int(game_id)
+    except (TypeError, ValueError):
+        numeric_game_id = -1
+
+    from robloxhive.games.murder_mystery_2 import OFFICIAL_PLACE_ID, MM2Autonomy
+    if numeric_game_id == OFFICIAL_PLACE_ID:
+        executor.attach_game_adapter(
+            MM2Autonomy(
+                perception=perception,
+                input_backend=input_backend,
+                navigator=navigator,
+            )
+        )
+        executor.metadata["game_adapter"] = "murder_mystery_2"
+        executor.metadata["game_name"] = "Murder Mystery 2"
+
     return executor
