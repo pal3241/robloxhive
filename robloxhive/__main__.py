@@ -52,14 +52,18 @@ def _run_body(args: argparse.Namespace) -> None:
             )
         instance = windows[0]
 
-    executor = create_generic_skill_executor(
-        hwnd=instance.hwnd,
-        game_id=args.game_id,
-        template_root=args.template_root,
-        model_path=args.model,
-        labels_path=args.labels,
-        enable_ocr=not args.no_ocr,
-    )
+    def build_executor(game_id: int):
+        return create_generic_skill_executor(
+            hwnd=instance.hwnd,
+            game_id=game_id,
+            template_root=args.template_root,
+            model_path=args.model,
+            labels_path=args.labels,
+            enable_ocr=not args.no_ocr,
+            input_mode=args.input_mode,
+        )
+
+    executor = build_executor(args.game_id)
     bridge = BodyBridge(
         brain_url=args.brain_url,
         executor=executor,
@@ -69,14 +73,16 @@ def _run_body(args: argparse.Namespace) -> None:
             "hwnd": instance.hwnd,
             "title": instance.title,
             "game_id": args.game_id,
-            "input_backend": "win32-message",
+            "input_backend": args.input_mode,
         },
+        executor_factory=build_executor,
     )
 
     print(f"RobloxHive Body {__version__}")
     print(f"Agent   : {args.agent_id}")
     print(f"PID/HWND: {instance.pid}/{instance.hwnd}")
-    print(f"Game ID : {args.game_id}")
+    print(f"Game ID : {args.game_id} (0 = pilih dari dashboard)")
+    print(f"Input   : {args.input_mode}")
     print(f"Brain   : {args.brain_url}")
     print(f"Skills  : {', '.join(executor.available())}")
     print(f"Perception: {executor.describe()['metadata'].get('perception', {})}")
@@ -116,6 +122,12 @@ def main() -> None:
     body.add_argument("--agent-id", default="agent-01")
     body.add_argument("--game-id", type=int, default=0)
     body.add_argument("--pid", type=int)
+    body.add_argument(
+        "--input-mode",
+        choices=["auto", "foreground", "message"],
+        default="auto",
+        help="auto/foreground uses guarded SendInput; message is background experimental",
+    )
     body.add_argument("--template-root", default="data/templates")
     body.add_argument("--model", help="optional YOLOv8-style ONNX detector path")
     body.add_argument("--labels", help="optional labels.txt or labels.json path")
