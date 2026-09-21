@@ -1,407 +1,338 @@
-# RobloxHive
+# RobloxHive 1.0.0
 
-Distributed autonomous Roblox agent with a remote-capable Brain Node and a Windows Body Node.
+RobloxHive is a **single-bot, local-first Roblox automation research project**.
 
-## v1.0.0 — Generic Dashboard Sessions, Multi-Instance Control, and Reliable Input
+The normal setup now uses one Windows laptop only:
 
-v1.0 makes the Windows Body game-agnostic at startup. A Body can start with `game_id=0`, report every Roblox window it can see, be rebound to a selected PID from the dashboard, and join a Place ID chosen at runtime.
-
-Highlights:
-
-- Windows Body reports Roblox PID/HWND inventory to a remote Brain, so the Instances tab works even when the dashboard runs on Android/Linux.
-- Dashboard assignment actually rebinds the selected Body to the selected Roblox PID.
-- Human/player instances can be marked protected; changing a bound instance to player/unassigned disarms that Body.
-- Body commands are routed by `agent_id`, preventing one multi-account Body from consuming another agent's command.
-- Generic **Join Game** accepts any Roblox Place ID from the dashboard.
-- Joining a new Place ID rebuilds the perception/navigation/game-adapter stack for that game without restarting RobloxHive.
-- New guarded foreground SendInput controller is the default because Roblox often ignores background `WM_KEY*` messages.
-- Dashboard has a W/A/S/D, Jump, Interact, and Release Keys control pad for verifying real control before starting autonomous behavior.
-- Existing MM2 specialization remains available automatically when its Place ID is selected.
-
-### Recommended v1 Body startup
-
-Start Roblox/ExoPanda first, then list windows:
-
-```powershell
-python -m robloxhive body --list-windows
-```
-
-Start a generic Body on one Roblox instance:
-
-```powershell
-python -m robloxhive body `
-  --brain-url http://192.168.1.6:8765 `
-  --agent-id agent-01 `
-  --pid 16800
-```
-
-Then open **Dashboard → Instances**:
-
-1. choose the Windows Body,
-2. mark your personal Roblox window **THIS IS ME**,
-3. assign the bot window to the selected Body,
-4. test W/A/S/D,
-5. enter any Place ID and press **Join Game**.
-
-The default input mode is `auto`, which currently uses guarded foreground SendInput. Use `--input-mode message` only for experimental background control.
-
-For Termux/Android, install the Brain without native search dependencies:
-
-```bash
-pip install -e ".[brain]"
-```
-
-Internet research is optional and can be added separately on platforms where `ddgs` installs cleanly:
-
-```bash
-pip install -e ".[research]"
-```
-
-
-## v0.9.0 — MM2 Dataset, Witnessed-Kill Reasoning, and Predictive Aim
-
-Murder Mystery 2 is the first specialized RobloxHive game adapter. v0.9 adds the training loop required to build a dedicated visual detector and improves combat reasoning for moving targets.
-
-## MM2 realtime loop
-
-```text
-Roblox bot HWND
-      ↓
-Fused perception
-      ↓
-Tracking + screen velocity
-      ↓
-MM2 Scene Reader
-      ↓
-Role Detector
-      ↓
-Threat Model
-      ├── visible knife/gun evidence
-      └── witnessed-kill evidence
-      ↓
-SURVIVAL FIRST
-      ↓
-Role Policy
- ┌────────────┼─────────────┐
- ▼            ▼             ▼
-Innocent   Sheriff/Hero   Murderer
-survive    lead + fire    melee/lead throw
-```
-
-The realtime MM2 reflex loop stays on the Windows Body. The Brain/Qwen can remain on another device.
-
-## Predictive aim
-
-Tracked detections now maintain an exponentially smoothed screen-space velocity:
-
-```text
-velocity_px_s = [vx, vy]
-speed_px_s
-track_age
-```
-
-Sheriff/Hero gun aim and Murderer knife throws use a bounded lead point:
-
-```text
-predicted_x = current_x + vx × lead_time
-predicted_y = current_y + vy × lead_time
-```
-
-Lead is clamped so a noisy tracker cannot aim far outside the target region.
-
-Default behavior:
-
-- Sheriff lead horizon: 0.08 s
-- Knife throw lead horizon: 0.20 s
-- Maximum screen lead: 140 px
-
-Close-range knife melee still aims directly at the current upper-torso position.
-
-## Witnessed-kill reasoning
-
-Visible knife ownership remains the strongest Murderer signal, but v0.9 can also use new corpse events as supporting evidence.
-
-```text
-previous frame: no corpse
-current frame : new dead_player detection
-             ↓
-find nearby tracked players
-             ↓
-knife holder nearby?
-     ├── yes → very strong Murderer evidence
-     └── no  → only reinforce an already suspicious player
-```
-
-Proximity alone never turns an innocent player into a confirmed Murderer.
-
-The first corpse snapshot after Body startup is treated as a baseline so joining mid-round does not create fake witnessed-kill events.
-
-Recent kill events and threat evidence are visible in MM2 diagnostics.
-
-## MM2 dataset pipeline
-
-v0.9 adds a full dataset workflow.
-
-```text
-Bot window
-   ↓
-Capture Frame
-   ↓
-data/datasets/mm2/raw
-   ↓
-detector proposals
-   ↓
-human review
-   ↓
-APPROVED boxes only
-   ↓
-YOLO train/val export
-   ↓
-Ultralytics fine-tune
-   ↓
-ONNX export
-   ↓
-data/models/142823291/detector.onnx
-```
-
-### Dataset classes
-
-Default MM2 classes:
-
-```text
-player
-knife
-gun
-dropped_gun
-dead_player
-```
-
-The label template is also stored at:
-
-```text
-config/mm2-labels.txt
-```
-
-## Dataset storage
-
-Raw captures:
-
-```text
-data/datasets/mm2/
-└── raw/
-    ├── images/
-    │   └── <sample-id>.png
-    └── annotations/
-        └── <sample-id>.json
-```
-
-Each annotation contains:
-
-- image dimensions
-- class
-- bounding box
-- detector confidence
-- detection source
-- approved/rejected state
-- optional note
-
-Detector proposals are **not** automatically trusted as training ground truth. Only approved boxes are exported.
-
-## MM2 Dashboard dataset workflow
-
-The MM2 dashboard now contains:
-
-- Capture Frame
-- Refresh Samples
-- screenshot preview
-- detector proposals drawn over the screenshot
-- a manual drag-box annotator
-- class selector: player / knife / gun / dropped_gun / dead_player
-- per-box approved/pending state
-- Save Review
-- Approve All Boxes
-- Reject All Boxes
-- Export Approved → YOLO
-- dataset sample/box counters
-
-This means the first dataset can be created **without any detector model installed**. Capture a frame, drag boxes around visible objects, assign the class, and save the review. When a model already exists, its detections appear as proposals that can be corrected rather than trusted automatically.
-
-Recommended workflow:
-
-1. Join MM2 with the selected bot window.
-2. Open the **MM2** dashboard tab.
-3. Capture representative situations:
-   - several avatar appearances
-   - knife equipped
-   - gun equipped
-   - dropped gun
-   - dead player/body
-   - different maps, rooms, distances, lighting, skins and camera angles
-4. Open each sample.
-5. Drag missing boxes manually and select the correct class.
-6. Toggle or reject wrong proposals.
-7. Save the review.
-8. Export the reviewed dataset.
-
-## YOLO export
-
-Approved samples are exported to:
-
-```text
-data/datasets/mm2/yolo/
-├── dataset.yaml
-├── images/
-│   ├── train/
-│   └── val/
-└── labels/
-    ├── train/
-    └── val/
-```
-
-Unknown/unapproved boxes are excluded.
-
-The export uses a deterministic train/validation split.
-
-## Training the MM2 detector
-
-Install training dependencies:
-
-```powershell
-pip install -e ".[training]"
-```
-
-Then train:
-
-```powershell
-python -m robloxhive mm2-train
-```
-
-Defaults:
-
-```text
-dataset    data/datasets/mm2/yolo/dataset.yaml
-base model yolov8n.pt
-epochs     50
-imgsz      640
-batch      8
-output     runs/mm2
-```
-
-Custom example:
-
-```powershell
-python -m robloxhive mm2-train ^
-  --dataset data\datasets\mm2\yolo\dataset.yaml ^
-  --base-model yolov8n.pt ^
-  --epochs 80 ^
-  --imgsz 640 ^
-  --batch 8 ^
-  --device cpu
-```
-
-The best checkpoint is exported to raw-output ONNX without embedded NMS so RobloxHive's lightweight ONNX Runtime parser can consume it.
-
-Final runtime files:
-
-```text
-data/models/142823291/
-├── detector.onnx
-├── labels.txt
-└── training.json
-```
-
-## Running the MM2 Body
-
-Install Windows runtime dependencies:
-
-```powershell
-pip install -e ".[windows]"
-```
-
-Find Roblox windows:
-
-```powershell
-python -m robloxhive body --list-windows
-```
-
-Start the bot instance explicitly:
-
-```powershell
-python -m robloxhive body ^
-  --brain-url http://192.168.1.50:8765 ^
-  --agent-id agent-01 ^
-  --game-id 142823291 ^
-  --pid 24680 ^
-  --model data\models\142823291\detector.onnx ^
-  --labels data\models\142823291\labels.txt
-```
-
-When game ID `142823291` is selected, the MM2 adapter attaches automatically.
-
-## Role behavior
-
-### Innocent
-
-- always-on survival
-- evade confirmed knife holder
-- continue observing and building threat evidence
-- never attack from an unknown role
-
-### Sheriff / Hero
-
-- survival is evaluated first
-- only fire at high-confidence Murderer
-- default fire threshold: 93%
-- do not fire when another avatar overlaps the predicted aim point
-- use tracked velocity to lead moving targets
-- gun cooldown prevents input spam
-
-### Murderer
-
-- survival can evade a visible gun holder
-- prioritize visible gun holder
-- close target → melee knife
-- medium/far target → predictive knife throw
-- too-far target → approach and re-evaluate
-- self avatar is excluded from targets
-
-## Role safety
-
-Role OCR must stabilize before offensive behavior starts.
-
-Once stable, the role is latched until lobby/round-end detection. If OCR is unavailable, the bot's own visible weapon can provide a fallback role hint.
-
-Manual dashboard role override is available for debugging only.
+- Windows runs Roblox, capture, OCR/detection, navigation, controller, dashboard, semantic map and long-term memory.
+- Ollama can run on the same laptop or on another reachable device such as an Android phone.
+- There is no required Brain/Body split for the main v1.0 workflow.
+- The old distributed commands remain for compatibility, but python -m robloxhive run is the recommended entry point.
 
 ## Architecture
 
-```text
-Phone / remote Brain
-├── Internet learning
-├── Qwen / Ollama
-├── per-game memory
-├── Goal Manager
-└── Planner
-          │
-          │ LAN API
-          ▼
-Windows Body
-├── explicit PID/HWND
-├── Roblox capture
-├── ONNX detector
-├── OCR
-├── player tracking
-├── velocity estimation
-├── local occupancy map + A*
-├── MM2 role detector
-├── witnessed-kill reasoner
-├── survival
-├── predictive combat
-└── dataset recorder
-```
+Python handles orchestration, perception, memory, semantic skills and Ollama integration.
 
-## Current boundary
+The dashboard is HTML/CSS/JavaScript with a classic dark-blue sidebar.
 
-The code now contains the full MM2 collection/training/export/runtime pipeline, but the repository does **not** contain a trained MM2 detector yet because no reviewed MM2 screenshots have been supplied.
+An optional zero-dependency Rust library accelerates small hot math operations such as predictive aim. If the DLL is not built, RobloxHive automatically uses the Python fallback.
 
-The next practical step is to collect and review real MM2 frames. Once enough varied examples exist, `mm2-train` can create the first dedicated ONNX model and the runtime can begin real-match detector tuning.
+~~~text
+Roblox HWND
+   |
+   +-- window capture
+   +-- OCR / ONNX / templates
+   +-- player + username tracking
+   +-- local navigation
+   +-- semantic world model
+   |
+   v
+SingleBotRuntime
+   +-- CognitiveMemory (SQLite)
+   +-- SemanticMap
+   +-- old Internet Learning knowledge
+   +-- action/result verification
+   |
+   v
+Ollama Actor
+   |
+   +-- observe / wait
+   +-- navigate / explore
+   +-- collect / interact / click_ui
+   +-- follow_player
+   +-- aim / combat
+   +-- press_key
+~~~
+
+Ollama is not only used to summarize text. It receives the current world state, user goal, relevant memory, map knowledge, recent action outcomes and available skill contracts, then selects the next semantic action.
+
+## Install on Windows
+
+Python 3.11 is recommended.
+
+~~~powershell
+git clone https://github.com/pal3241/robloxhive.git
+cd robloxhive
+
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install -U pip
+pip install -e ".[single]"
+~~~
+
+Tesseract is optional but recommended for UI text and username/nameplate recognition.
+
+## Ollama on the same laptop
+
+Start Ollama normally and make sure the model exists:
+
+~~~powershell
+ollama pull qwen2.5:3b
+ollama run qwen2.5:3b
+~~~
+
+RobloxHive defaults to:
+
+~~~text
+http://127.0.0.1:11434
+qwen2.5:3b
+~~~
+
+A small text model is enough for the scenario-level loop because realtime aiming/navigation stays deterministic on Windows.
+
+For a vision-capable Ollama model, start RobloxHive with --vision-llm or enable Vision in Settings. Screenshots are resized and JPEG-compressed before being sent.
+
+## Ollama on a phone or another PC
+
+The Windows bot still runs completely on the laptop. Only Ollama is remote.
+
+Make Ollama reachable on the LAN, then set its URL in Dashboard -> Settings, for example:
+
+~~~text
+http://192.168.1.6:11434
+~~~
+
+Or start with:
+
+~~~powershell
+python -m robloxhive run --pid 16800 --ollama-url http://192.168.1.6:11434
+~~~
+
+## Run
+
+Open the Roblox bot account first.
+
+Find the Roblox PID:
+
+~~~powershell
+python -m robloxhive run --list-windows
+~~~
+
+Example:
+
+~~~text
+PID=16800 HWND=48301638 TITLE='Robloxianp2v4f2p0'
+~~~
+
+Start the bot:
+
+~~~powershell
+python -m robloxhive run --pid 16800
+~~~
+
+Dashboard:
+
+~~~text
+http://127.0.0.1:8765
+~~~
+
+If there is exactly one Roblox window, --pid can be omitted.
+
+## Dashboard
+
+The v1 dashboard is intentionally simple and single-bot oriented:
+
+~~~text
+Overview
+Agent
+Game & Controls
+Vision & UI
+Memory
+Map
+Learning
+Settings
+~~~
+
+There are no Body selectors or multi-agent heartbeat lists.
+
+### Agent
+
+Give the AI a high-level custom scenario, for example:
+
+~~~text
+Cari objective utama, pahami UI yang ada, coba selesaikan objective,
+dan belajar dari kegagalan. Jangan mengulang aksi gagal tanpa perubahan.
+~~~
+
+Ollama receives the current scene and decides a semantic action. Every action result is stored and fed back into later decisions.
+
+### Follow Player
+
+Use the exact Roblox username.
+
+RobloxHive prefers:
+
+~~~text
+player detector + tracker
+        +
+exact nameplate OCR
+~~~
+
+If a game-specific player detector is unavailable, it can fall back to exact OCR nameplate following. It does not silently follow a random avatar if the requested username cannot be verified.
+
+### UI interaction
+
+The generic UI skill can:
+
+~~~text
+find visible OCR text
+        ->
+click its center
+        ->
+observe the next state
+~~~
+
+This lets Ollama handle custom menus and prompts instead of relying only on pre-written per-game code.
+
+### FPS / shooting games
+
+Generic combat includes:
+
+- tracked target velocity
+- predictive lead
+- upper-torso aiming
+- bounded lead correction
+- optional weapon hotkey
+- click/fire action verification on the next AI cycle
+
+MM2 keeps its specialized role/threat logic. Generic games can use the general aim and combat skills.
+
+## Memory
+
+Main memory database:
+
+~~~text
+data/memory/robloxhive.db
+~~~
+
+Memory types:
+
+~~~text
+episodic
+semantic
+procedural
+social
+team
+enemy
+role
+ui
+map
+strategy
+failure
+goal
+action
+research
+~~~
+
+RobloxHive also stores relations such as:
+
+~~~text
+player -> member_of_team -> blue
+~~~
+
+Failures are deliberately remembered so the LLM sees what did not work before choosing another action.
+
+## Semantic map
+
+The high-level map is not only a temporary screen grid.
+
+It remembers landmarks, routes, travel time, route success rate, danger, location value, visits and useful interactions.
+
+This is a topological/semantic map, so it can still learn games where exact 3D coordinates are unavailable.
+
+The existing local occupancy-grid + A* navigation remains available for immediate obstacle handling.
+
+## Internet Learning
+
+The old research pipeline remains available in the Learning tab.
+
+Research is saved under:
+
+~~~text
+data/games/<game_id>/
+~~~
+
+When knowledge.json changes, the single-bot runtime imports useful knowledge into CognitiveMemory automatically:
+
+- objectives -> semantic memory
+- progression/endgame -> procedural memory
+- enemies -> enemy memory
+- locations -> map memory
+- strategies -> strategy memory
+- common mistakes -> failure memory
+
+Internet knowledge is context, not ground truth. Current gameplay observations and verified action outcomes take priority.
+
+Install web research support separately:
+
+~~~powershell
+pip install -e ".[research]"
+~~~
+
+## Optional Rust accelerator
+
+Rust is not required.
+
+Build it with:
+
+~~~powershell
+cd native\robloxhive-native
+cargo build --release
+cd ..\..
+~~~
+
+RobloxHive automatically detects:
+
+~~~text
+native/robloxhive-native/target/release/robloxhive_native.dll
+~~~
+
+If it is absent, the Python fallback is used.
+
+## Useful launch options
+
+Local Ollama:
+
+~~~powershell
+python -m robloxhive run --pid 16800 --ollama-model qwen2.5:3b
+~~~
+
+Remote Ollama:
+
+~~~powershell
+python -m robloxhive run --pid 16800 --ollama-url http://192.168.1.6:11434 --ollama-model qwen2.5:3b
+~~~
+
+Vision-capable Ollama model:
+
+~~~powershell
+python -m robloxhive run --pid 16800 --ollama-model YOUR_VISION_MODEL --vision-llm
+~~~
+
+Explicit detector:
+
+~~~powershell
+python -m robloxhive run --pid 16800 --detector-model data\models\GAME_ID\detector.onnx --labels data\models\GAME_ID\labels.txt
+~~~
+
+Background input is available but some Roblox builds may ignore window messages. The default reliable input path validates the assigned HWND before sending input.
+
+## Legacy distributed mode
+
+The older Brain/Body commands remain for compatibility:
+
+~~~text
+python -m robloxhive dashboard
+python -m robloxhive body
+~~~
+
+New development should target single mode unless there is a specific reason to distribute the runtime.
+
+## Safety model
+
+The bot is bound to one explicit Roblox HWND/PID.
+
+RobloxHive does not intentionally fall back to desktop-wide capture or guess a different Roblox window if the assigned one disappears.
+
+The AI can choose only registered semantic skills; arbitrary shell commands or arbitrary code produced by Ollama are never executed.
