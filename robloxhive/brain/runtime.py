@@ -50,6 +50,7 @@ class AgentRuntime:
                 source="planner",
                 type="EXECUTE_SKILL",
                 payload={
+                    "agent_id": str(plan.goal.metadata.get("agent_id") or "agent-01"),
                     "plan_id": plan.id,
                     "game_id": plan.game_id,
                     "step_index": step.index,
