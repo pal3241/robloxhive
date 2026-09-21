@@ -82,7 +82,14 @@ class SkillExecutor:
             elif action == "interact":
                 backend.interact()
             elif action == "release":
-                backend.release_all()
+                # Release both paths so switching between background dashboard
+                # control and reliable foreground automation cannot leave a key held.
+                released = set()
+                for candidate in (self.input_backend, self.background_input_backend):
+                    if candidate is None or id(candidate) in released:
+                        continue
+                    released.add(id(candidate))
+                    candidate.release_all()
             else:
                 return {"ok": False, "error": "UNSUPPORTED_DIRECT_ACTION", "action": action}
             return {
