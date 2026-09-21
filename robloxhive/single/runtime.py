@@ -4,6 +4,7 @@ import base64
 import json
 import threading
 import time
+from pathlib import Path
 from collections import deque
 from dataclasses import asdict
 from typing import Any
@@ -65,6 +66,7 @@ class SingleBotRuntime:
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
         self._last_tick = 0.0
+        self._knowledge_mtime: dict[int, float] = {}
 
     def start(self) -> None:
         if self.running:
@@ -175,6 +177,61 @@ class SingleBotRuntime:
         except Exception:
             return None
 
+    def _sync_legacy_knowledge(self) -> None:
+        """Import the existing Internet Learning knowledge into cognitive memory."""
+        path = Path("data/games") / str(self.game_id) / "knowledge.json"
+        if not path.exists():
+            return
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return
+        if self._knowledge_mtime.get(self.game_id) == mtime:
+            return
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+
+        section_kind = {
+            "objectives": "semantic",
+            "progression": "procedural",
+            "mechanics": "semantic",
+            "items": "semantic",
+            "enemies": "enemy",
+            "locations": "map",
+            "strategies": "strategy",
+            "common_mistakes": "failure",
+            "endgame": "procedural",
+        }
+        for section, kind in section_kind.items():
+            for index, item in enumerate(data.get(section, []) or []):
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text") or "").strip()
+                if not text:
+                    continue
+                try:
+                    confidence = float(item.get("confidence", 0.55))
+                except (TypeError, ValueError):
+                    confidence = 0.55
+                self.memory.upsert_fact(
+                    kind,
+                    f"research:{section}:{index}:{abs(hash(text))}",
+                    text,
+                    game_id=self.game_id,
+                    data={
+                        "section": section,
+                        "sources": item.get("sources", []),
+                        "verified_in_game": item.get("verified_in_game", False),
+                        "source": "internet_learning",
+                    },
+                    confidence=max(0.1, min(confidence, 0.95)),
+                    importance=0.55 if not item.get("verified_in_game") else 0.8,
+                )
+        self._knowledge_mtime[self.game_id] = mtime
+
     def _memory_query(self, world: dict[str, Any]) -> str:
         ui = " ".join(world.get("ui_text", [])[:15])
         entities = " ".join(str(x.get("label", "")) for x in world.get("entities", [])[:20])
@@ -261,6 +318,7 @@ class SingleBotRuntime:
         if not self.enabled or self.goal.get("type") == "idle":
             return
 
+        self._sync_legacy_knowledge()
         snapshot = self.world.observe()
         world = snapshot.compact()
         self.last_world = world
