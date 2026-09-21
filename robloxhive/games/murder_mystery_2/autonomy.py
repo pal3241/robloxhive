@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from robloxhive.games.murder_mystery_2.combat import MM2Combat
+from robloxhive.games.murder_mystery_2.dataset import MM2DatasetRecorder
 from robloxhive.games.murder_mystery_2.event_reasoning import WitnessedKillReasoner
 from robloxhive.games.murder_mystery_2.models import MM2Role, MM2State, RoundPhase
 from robloxhive.games.murder_mystery_2.role_detector import MM2RoleDetector
@@ -24,11 +25,16 @@ class MM2Autonomy:
         perception: Any,
         input_backend: Any,
         navigator: Any | None = None,
+        frame_source: Any | None = None,
     ) -> None:
         self.perception = perception
         self.input = input_backend
         self.navigator = navigator
+        self.frame_source = frame_source
         self.scene_reader = MM2SceneReader(perception)
+        self.dataset = MM2DatasetRecorder(frame_source) if frame_source is not None else None
+        self._last_scene = None
+        self._last_kill_events_count = 0
         self.role_detector = MM2RoleDetector(stable_frames=2)
         self.threats = MM2ThreatModel()
         self.kill_reasoner = WitnessedKillReasoner()
@@ -50,6 +56,52 @@ class MM2Autonomy:
             self.state.role_override = None if value in {"", "auto", "none"} else MM2Role(value)
         elif action == "clear_role":
             self.state.role_override = None
+        elif action == "dataset_status":
+            return {"ok": True, "dataset": self.dataset.status() if self.dataset else None}
+        elif action == "dataset_list":
+            if self.dataset is None:
+                return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
+            return {"ok": True, "samples": self.dataset.list_samples(int(payload.get("limit") or 50))}
+        elif action == "dataset_capture":
+            if self.dataset is None:
+                return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
+            scene = self._last_scene or self.scene_reader.observe()
+            auto_value = payload.get("auto_approve_confidence")
+            auto_conf = float(auto_value) if auto_value is not None else None
+            sample = self.dataset.capture(
+                detections=scene.raw_detections,
+                note=str(payload.get("note") or "") or None,
+                auto_approve_confidence=auto_conf,
+            )
+            return {"ok": True, "sample": sample.__dict__, "dataset": self.dataset.status()}
+        elif action == "dataset_preview":
+            if self.dataset is None:
+                return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
+            sample_id = str(payload.get("sample_id") or "")
+            return {
+                "ok": True,
+                "sample": self.dataset.get_sample(sample_id),
+                "preview": self.dataset.preview_data_url(sample_id),
+            }
+        elif action == "dataset_approve":
+            if self.dataset is None:
+                return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
+            indices = payload.get("indices")
+            if indices is not None:
+                indices = [int(x) for x in indices]
+            data = self.dataset.approve_boxes(
+                str(payload.get("sample_id") or ""),
+                indices=indices,
+                approved=bool(payload.get("approved", True)),
+            )
+            return {"ok": True, "sample": data, "dataset": self.dataset.status()}
+        elif action == "dataset_export":
+            if self.dataset is None:
+                return {"ok": False, "error": "DATASET_RECORDER_UNAVAILABLE"}
+            result = self.dataset.export_yolo(
+                validation_ratio=float(payload.get("validation_ratio") or 0.2)
+            )
+            return {"ok": True, "export": result, "dataset": self.dataset.status()}
         else:
             return {"ok": False, "error": "UNKNOWN_MM2_CONTROL"}
         return {"ok": True, "state": self.status()}
@@ -72,8 +124,10 @@ class MM2Autonomy:
         self.state.ticks += 1
 
         scene = self.scene_reader.observe()
+        self._last_scene = scene
         self.threats.update(scene)
         kill_events = self.kill_reasoner.update(scene, self.threats)
+        self._last_kill_events_count = len(kill_events)
 
         detected_role, role_confidence, phase = self.role_detector.detect(scene.ui_text)
 
@@ -175,7 +229,7 @@ class MM2Autonomy:
             "ui_text_sample": scene.ui_text[:12],
             "kill_events_recent": self.kill_reasoner.recent(),
             "threat_evidence_recent": list(self.threats.evidence_log)[-10:],
-            "new_kill_events": len(kill_events),
+            "new_kill_events": self._last_kill_events_count,
         }
         return self.status()
 
@@ -202,4 +256,5 @@ class MM2Autonomy:
                 "knife_throws": self.state.knife_throws,
             },
             "diagnostics": dict(self.state.diagnostics),
+            "dataset": self.dataset.status() if self.dataset else None,
         }
