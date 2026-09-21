@@ -1,0 +1,5 @@
+player
+knife
+gun
+dropped_gun
+dead_player
