@@ -69,6 +69,7 @@ def _run_single(args: argparse.Namespace) -> None:
         decision_interval_s=args.decision_interval,
         vision_llm=args.vision_llm,
         executor_factory=build_executor,
+        game_context_provider=lambda: detect_process_game_context(instance.pid),
     )
     runtime.start()
     app = create_single_app(runtime)
