@@ -51,26 +51,62 @@ class UiTextDetector:
         data: dict[str, Any] = pytesseract.image_to_data(gray, output_type=Output.DICT)
 
         out: list[Detection] = []
+        lines: dict[tuple[int, int, int], list[tuple[str, float, float, float, float, float]]] = {}
         for i, text in enumerate(data.get("text", [])):
             text = str(text).strip()
             if not text:
                 continue
             try:
                 conf = float(data["conf"][i])
-            except (TypeError, ValueError):
+                left = float(data["left"][i])
+                top = float(data["top"][i])
+                width = float(data["width"][i])
+                height = float(data["height"][i])
+            except (TypeError, ValueError, IndexError):
                 continue
             if conf < self.confidence:
                 continue
+            word = Detection(
+                label=text,
+                confidence=min(1.0, conf / 100.0),
+                x=left,
+                y=top,
+                width=width,
+                height=height,
+                source="ocr",
+                metadata={"text": text, "ocr_level": "word"},
+            )
+            out.append(word)
+            try:
+                line_key = (
+                    int(data.get("block_num", [0])[i]),
+                    int(data.get("par_num", [0])[i]),
+                    int(data.get("line_num", [0])[i]),
+                )
+            except (TypeError, ValueError, IndexError):
+                line_key = (0, 0, i)
+            lines.setdefault(line_key, []).append((text, conf, left, top, width, height))
+
+        for words in lines.values():
+            if len(words) < 2:
+                continue
+            words.sort(key=lambda row: row[2])
+            text = " ".join(row[0] for row in words).strip()
+            x1 = min(row[2] for row in words)
+            y1 = min(row[3] for row in words)
+            x2 = max(row[2] + row[4] for row in words)
+            y2 = max(row[3] + row[5] for row in words)
+            avg_conf = sum(row[1] for row in words) / len(words)
             out.append(
                 Detection(
                     label=text,
-                    confidence=min(1.0, conf / 100.0),
-                    x=float(data["left"][i]),
-                    y=float(data["top"][i]),
-                    width=float(data["width"][i]),
-                    height=float(data["height"][i]),
+                    confidence=min(1.0, avg_conf / 100.0),
+                    x=x1,
+                    y=y1,
+                    width=max(1.0, x2 - x1),
+                    height=max(1.0, y2 - y1),
                     source="ocr",
-                    metadata={"text": text},
+                    metadata={"text": text, "ocr_level": "line"},
                 )
             )
         return out
