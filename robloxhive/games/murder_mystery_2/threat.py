@@ -46,7 +46,7 @@ class MM2ThreatModel:
     def murderer(self, scene: MM2SceneSnapshot) -> PlayerObservation | None:
         candidates = [
             p for p in scene.players
-            if self.murderer_score.get(p.track_id, 0.0) > 0.20
+            if not p.is_self and self.murderer_score.get(p.track_id, 0.0) > 0.20
         ]
         if not candidates:
             return None
@@ -55,7 +55,7 @@ class MM2ThreatModel:
     def sheriff(self, scene: MM2SceneSnapshot) -> PlayerObservation | None:
         candidates = [
             p for p in scene.players
-            if self.sheriff_score.get(p.track_id, 0.0) > 0.20
+            if not p.is_self and self.sheriff_score.get(p.track_id, 0.0) > 0.20
         ]
         if not candidates:
             return None
