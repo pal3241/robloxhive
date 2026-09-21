@@ -14,8 +14,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: python -m pip install -e .
+        run: python -m pip install -e ".[brain]"
       - name: Compile
         run: python -m compileall -q robloxhive tests
+      - name: Dashboard smoke import
+        run: python -c "from robloxhive.interface.dashboard import create_app; app=create_app(); assert app.title == 'RobloxHive Dashboard'"
       - name: Unit tests
         run: python -m unittest discover -s tests -v
