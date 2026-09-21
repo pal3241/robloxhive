@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -36,6 +37,10 @@ class OllamaRequest(BaseModel):
     url: str | None = Field(default=None, max_length=300)
     model: str | None = Field(default=None, max_length=120)
     vision: bool | None = None
+
+
+class ModelPullRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=120)
 
 
 class GameRequest(BaseModel):
@@ -92,6 +97,13 @@ def create_single_app(runtime: SingleBotRuntime) -> FastAPI:
         learning_memory,
         synthesizer=RuntimeKnowledgeSynthesizer(runtime),
     )
+    pull_state: dict[str, Any] = {
+        "running": False,
+        "model": None,
+        "status": "idle",
+        "error": None,
+        "finished_at": None,
+    }
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -145,6 +157,46 @@ def create_single_app(runtime: SingleBotRuntime) -> FastAPI:
             model=request.model,
             vision=request.vision,
         )
+
+    @app.get("/api/ollama/pull")
+    def pull_status() -> dict[str, Any]:
+        return dict(pull_state)
+
+    @app.post("/api/ollama/pull")
+    def pull_model(request: ModelPullRequest) -> dict[str, Any]:
+        if pull_state.get("running"):
+            raise HTTPException(status_code=409, detail="A model pull is already running")
+
+        pull_state.update(
+            running=True,
+            model=request.model,
+            status="pulling",
+            error=None,
+            finished_at=None,
+        )
+
+        def worker() -> None:
+            try:
+                runtime.actor._request(
+                    "/api/pull",
+                    {"name": request.model, "stream": False},
+                )
+                pull_state.update(
+                    running=False,
+                    status="complete",
+                    error=None,
+                    finished_at=time.time(),
+                )
+            except Exception as exc:
+                pull_state.update(
+                    running=False,
+                    status="failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                    finished_at=time.time(),
+                )
+
+        threading.Thread(target=worker, name="robloxhive-ollama-pull", daemon=True).start()
+        return dict(pull_state)
 
     @app.post("/api/game")
     def set_game(request: GameRequest) -> dict[str, Any]:
