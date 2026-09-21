@@ -606,7 +606,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.post("/api/body/skills/test")
     def test_body_skill(request: ManualSkillRequest) -> dict:
         node = body_nodes.get(request.agent_id)
-        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
             raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
         if request.skill not in node.get("skills", []):
             raise HTTPException(
@@ -651,7 +651,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.post("/api/body/perception/probe")
     def probe_perception(request: PerceptionProbeRequest) -> dict:
         node = body_nodes.get(request.agent_id)
-        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
             raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
 
         probe_id = uuid4().hex[:12]
@@ -705,7 +705,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.post("/api/body/navigation/probe")
     def probe_navigation(request: NavigationProbeRequest) -> dict:
         node = body_nodes.get(request.agent_id)
-        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
             raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
 
         probe_id = uuid4().hex[:12]
@@ -786,7 +786,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.post("/api/games/mm2/control")
     def mm2_control(request: GameControlRequest) -> dict:
         node = body_nodes.get(request.agent_id)
-        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
             raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
         game = node.get("metadata", {}).get("game", {})
         if game.get("adapter") != "murder_mystery_2":
@@ -815,7 +815,7 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
     @app.post("/api/games/mm2/dataset")
     def mm2_dataset(request: MM2DatasetRequest) -> dict:
         node = body_nodes.get(request.agent_id)
-        if not node or time.time() - float(node.get("last_seen", 0)) > 15.0:
+        if not node or time.time() - float(node.get("last_seen", 0)) > 30.0:
             raise HTTPException(status_code=409, detail="Selected Windows Body is offline")
         game = node.get("metadata", {}).get("game", {})
         if game.get("adapter") != "murder_mystery_2":
