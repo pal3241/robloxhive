@@ -310,6 +310,20 @@ class GenericVisualSkills:
             if abs(offset) > cfg.center_tolerance:
                 self.input.move("right" if offset > 0 else "left", cfg.steering_seconds)
                 stable = 0
+            elif detection.source == "ocr":
+                # OCR-only username fallback. A nameplate box is much smaller
+                # than an avatar, so area ratio is not a valid distance proxy.
+                frame_w, frame_h = self.perception.frame_size()
+                vertical = detection.center_y / frame_h if frame_h > 0 else 0.5
+                if vertical < 0.48:
+                    self.input.move("forward", cfg.forward_seconds)
+                    stable = 0
+                elif vertical > 0.82:
+                    self.input.move("back", cfg.forward_seconds)
+                    stable = 0
+                else:
+                    self.input.release_all()
+                    stable += 1
             elif area_ratio < cfg.follow_far_area_ratio:
                 self.input.move("forward", cfg.forward_seconds)
                 stable = 0
@@ -319,19 +333,22 @@ class GenericVisualSkills:
             else:
                 self.input.release_all()
                 stable += 1
-                if stable >= 3:
-                    return ActionResult(
-                        action="follow_player",
-                        status=ActionStatus.SUCCESS,
-                        details={
-                            "target": target,
-                            "distance_band": "maintained",
-                            "evidence": {
-                                "target_visible": True,
-                                "follow_distance_stable": True,
-                            },
+
+            if stable >= 3:
+                return ActionResult(
+                    action="follow_player",
+                    status=ActionStatus.SUCCESS,
+                    details={
+                        "target": target,
+                        "distance_band": "maintained",
+                        "tracking_mode": detection.metadata.get("tracking_mode"),
+                        "evidence": {
+                            "target_visible": True,
+                            "username_verified": bool(detection.metadata.get("username_verified")),
+                            "follow_distance_stable": True,
                         },
-                    )
+                    },
+                )
             time.sleep(cfg.settle_seconds)
 
         self.input.release_all()
