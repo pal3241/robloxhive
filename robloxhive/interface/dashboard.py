@@ -912,6 +912,14 @@ def create_app(data_root: str | Path = "data/games") -> FastAPI:
         if node:
             node["last_seen"] = time.time()
             node["last_result"] = request.result.model_dump(mode="json")
+        active_plan = runtime.get_plan(request.plan_id)
+        if active_plan is not None:
+            expected_agent = str(active_plan.goal.metadata.get("agent_id") or "agent-01")
+            if expected_agent != request.agent_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Plan belongs to {expected_agent}, not {request.agent_id}",
+                )
         try:
             plan = runtime.record_result(
                 request.plan_id,
