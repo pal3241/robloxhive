@@ -20,7 +20,7 @@
     .item{padding:11px 0;border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.progress{height:8px;background:#0e121a;border-radius:99px;overflow:hidden;margin-top:8px}.progress>div{height:100%;background:var(--accent)}
     pre{white-space:pre-wrap;word-break:break-word;background:#0e121a;padding:12px;border-radius:10px;max-height:430px;overflow:auto}
     .memory-layout{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(0,2fr);gap:14px}.knowledge-section{margin:16px 0}.knowledge-entry{background:#10141d;border:1px solid var(--line);border-radius:9px;padding:10px;margin:7px 0}.knowledge-entry small{color:var(--muted)}
-    .game-btn{display:block;width:100%;margin:7px 0;text-align:left}.meta{font-size:.84rem;color:var(--muted);margin-top:4px}.source{overflow-wrap:anywhere}.summary{line-height:1.55}
+    .game-btn{display:block;width:100%;margin:7px 0;text-align:left}.meta{font-size:.84rem;color:var(--muted);margin-top:4px}.source{overflow-wrap:anywhere}.summary{line-height:1.55}.dataset-preview{max-width:100%;border:1px solid var(--line);border-radius:10px;margin-top:10px}
     @media(max-width:720px){.memory-layout{grid-template-columns:1fr}}
   </style>
 </head>
@@ -257,6 +257,32 @@ dropped_gun
 dead_player</pre>
         <div class="meta">Model ONNX MM2 sebaiknya punya label player + weapon agar threat/role targeting penuh bekerja.</div>
       </div>
+
+      <div class="card">
+        <h2>MM2 Dataset</h2>
+        <div id="mm2DatasetStatus" class="muted">Belum ada status dataset.</div>
+        <label>Note capture (optional)</label><input id="mm2DatasetNote" placeholder="contoh: sheriff terlihat + knife holder">
+        <div class="row" style="margin-top:10px">
+          <button id="mm2DatasetCapture" type="button">Capture Frame</button>
+          <button id="mm2DatasetList" class="secondary" type="button">Refresh Samples</button>
+        </div>
+        <button id="mm2DatasetExport" class="secondary" type="button" style="margin-top:8px;width:100%">Export Approved → YOLO</button>
+        <p id="mm2DatasetMessage" class="muted"></p>
+        <div class="meta">Hanya box berstatus approved yang masuk dataset training.</div>
+      </div>
+      <div class="card">
+        <h2>Dataset Samples</h2>
+        <div id="mm2DatasetSamples"><p class="muted">Belum ada sample list.</p></div>
+      </div>
+      <div class="card">
+        <h2>Sample Review</h2>
+        <div id="mm2DatasetReview"><p class="muted">Klik sample untuk preview.</p></div>
+        <img id="mm2DatasetPreview" class="dataset-preview" alt="MM2 dataset preview" style="display:none">
+        <div class="row" style="margin-top:10px">
+          <button id="mm2ApproveAll" type="button">Approve All Boxes</button>
+          <button id="mm2RejectAll" class="secondary" type="button">Reject All Boxes</button>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -276,7 +302,7 @@ dead_player</pre>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}return r.json()}
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(b.dataset.tab==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(b.dataset.tab==='mm2')loadMM2()}));
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.tab,.view').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active');if(b.dataset.tab==='memory')loadGames();if(b.dataset.tab==='instances')loadInstances();if(b.dataset.tab==='learn')loadJobs();if(b.dataset.tab==='agent'){loadAgentGames();loadActivePlan()}if(b.dataset.tab==='skills'){loadBodies();loadSkillTests()}if(b.dataset.tab==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(b.dataset.tab==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(b.dataset.tab==='mm2'){loadMM2();loadMM2DatasetControls()}}));
 async function health(){try{const d=await api('/api/health');$('#health').textContent='● v'+d.version;$('#health').className='pill ok';$('#synthMode').textContent='Synthesizer: '+d.synthesizer}catch{$('#health').textContent='● offline';$('#health').className='pill bad'}}
 async function loadInstances(){const root=$('#instanceList');root.innerHTML='<p class="muted">Scanning…</p>';try{const items=await api('/api/instances');root.innerHTML=items.length?'':'<p class="muted">Tidak ada Roblox window terdeteksi.</p>';items.forEach(i=>{const div=document.createElement('div');div.className='item';div.innerHTML='<b>'+esc(i.title)+'</b> <span class="pill">'+esc(i.role)+'</span><div class="muted">PID '+i.pid+' · HWND '+i.hwnd+(i.protected?' · PROTECTED':'')+'</div><div class="row" style="margin-top:8px"><button data-player>THIS IS ME</button><button class="secondary" data-bot>ASSIGN BOT-01</button></div>';div.querySelector('[data-player]').onclick=()=>setRole(i.pid,'player');div.querySelector('[data-bot]').onclick=()=>setRole(i.pid,'bot','agent-01');root.appendChild(div)})}catch(e){root.innerHTML='<p class="bad">'+esc(e.message)+'</p>'}}
 async function setRole(pid,role,agent_id=null){await api('/api/instances/'+pid+'/role',{method:'POST',body:JSON.stringify({role,agent_id})});loadInstances()}
@@ -504,13 +530,15 @@ function mm2StateHtml(row){
   const s=row.state||{}, st=s.stats||{}, d=s.diagnostics||{};
   const roleConf=Math.round((s.role_confidence||0)*100);
   const murdConf=Math.round((s.murderer_confidence||0)*100);
+  const ds=s.dataset||{};
   return '<b>'+esc(row.agent_id)+'</b> <span class="pill '+(row.online?'ok':'bad')+'">'+(row.online?'online':'offline')+'</span> <span class="pill">'+esc(s.enabled?'AUTONOMY ON':'AUTONOMY OFF')+'</span>'+
     '<div class="item"><b>Role</b><div class="meta">'+esc(s.role||'unknown')+' · '+roleConf+'%'+(s.role_override?' · override '+esc(s.role_override):'')+'</div></div>'+
     '<div class="item"><b>Mode</b><div class="meta">'+esc(s.mode||'-')+' · '+esc(s.last_action||'-')+(s.last_reason?' · '+esc(s.last_reason):'')+'</div></div>'+
     '<div class="item"><b>Murderer</b><div class="meta">track '+esc(s.murderer_track_id??'-')+' · confidence '+murdConf+'%</div></div>'+
     '<div class="item"><b>Target</b><div class="meta">track '+esc(s.target_track_id??'-')+' · sheriff track '+esc(s.sheriff_track_id??'-')+'</div></div>'+
     '<div class="item"><b>Stats</b><div class="meta">ticks '+esc(st.ticks||0)+' · evade '+esc(st.survival_moves||0)+' · shots '+esc(st.shots||0)+' · melee '+esc(st.knife_swings||0)+' · throws '+esc(st.knife_throws||0)+'</div></div>'+
-    '<div class="item"><b>Scene</b><div class="meta">players '+esc(d.players_visible||0)+' · knives '+esc(d.knives_visible||0)+' · guns '+esc(d.guns_visible||0)+' · bodies '+esc(d.bodies_visible||0)+'</div></div>';
+    '<div class="item"><b>Scene</b><div class="meta">players '+esc(d.players_visible||0)+' · knives '+esc(d.knives_visible||0)+' · guns '+esc(d.guns_visible||0)+' · bodies '+esc(d.bodies_visible||0)+'</div></div>'+
+    '<div class="item"><b>Dataset</b><div class="meta">samples '+esc(ds.samples||0)+' · approved samples '+esc(ds.approved_samples||0)+' · approved boxes '+esc(ds.approved_boxes||0)+'</div></div>';
 }
 async function loadMM2(){
   const root=$('#mm2Nodes'), select=$('#mm2Agent');
@@ -545,7 +573,71 @@ $('#mm2ApplyRole').onclick=()=>{
   else mm2Control('role_override',role);
 };
 
-health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(active==='mm2')loadMM2()},2000);
+
+let mm2CurrentDatasetSample=null;
+async function mm2DatasetAction(action,extra={}){
+  const agent=$('#mm2Agent').value;
+  if(!agent){$('#mm2DatasetMessage').textContent='Pilih Windows Body MM2 dulu.';return null}
+  try{
+    const r=await api('/api/games/mm2/dataset',{method:'POST',body:JSON.stringify({agent_id:agent,action,...extra})});
+    $('#mm2DatasetMessage').textContent='Dataset action '+action+' queued: '+r.control_id;
+    return r;
+  }catch(e){$('#mm2DatasetMessage').textContent=e.message;return null}
+}
+async function loadMM2DatasetControls(){
+  try{
+    const rows=await api('/api/games/mm2/controls');
+    const complete=rows.filter(x=>x.status==='complete'&&x.result?.ok);
+    const datasetResult=complete.find(x=>String(x.action||'').startsWith('dataset_'));
+    if(datasetResult?.result?.dataset){
+      const ds=datasetResult.result.dataset;
+      $('#mm2DatasetStatus').textContent='Samples '+(ds.samples||0)+' · approved '+(ds.approved_samples||0)+' · boxes '+(ds.approved_boxes||0)+' · '+(ds.root||'');
+    }
+    const listResult=complete.find(x=>x.action==='dataset_list'&&Array.isArray(x.result?.samples));
+    if(listResult){
+      const root=$('#mm2DatasetSamples');root.innerHTML='';
+      const samples=listResult.result.samples||[];
+      if(!samples.length)root.innerHTML='<p class="muted">Belum ada sample.</p>';
+      samples.forEach(s=>{
+        const b=document.createElement('button');b.className='secondary game-btn';
+        b.innerHTML='<b>'+esc(s.id)+'</b><div class="meta">boxes '+esc(s.boxes||0)+' · approved '+esc(s.approved_boxes||0)+(s.note?' · '+esc(s.note):'')+'</div>';
+        b.onclick=async()=>{mm2CurrentDatasetSample=s.id;await mm2DatasetAction('preview',{sample_id:s.id});setTimeout(loadMM2DatasetControls,350)};
+        root.appendChild(b);
+      });
+    }
+    const previewResult=complete.find(x=>x.action==='dataset_preview'&&x.result?.preview);
+    if(previewResult){
+      const sample=previewResult.result.sample||{};
+      mm2CurrentDatasetSample=sample.id||mm2CurrentDatasetSample;
+      const img=$('#mm2DatasetPreview');img.src=previewResult.result.preview;img.style.display='block';
+      const boxes=sample.boxes||[];
+      $('#mm2DatasetReview').innerHTML='<b>'+esc(sample.id||'sample')+'</b><div class="meta">'+boxes.map((b,i)=>'#'+i+' '+b.label+' '+Math.round((b.confidence||0)*100)+'% '+(b.approved?'APPROVED':'pending')).join(' · ')+'</div>';
+    }
+    const exportResult=complete.find(x=>x.action==='dataset_export'&&x.result?.export);
+    if(exportResult){
+      const ex=exportResult.result.export;
+      $('#mm2DatasetMessage').textContent='YOLO export ready: train '+ex.train+' · val '+ex.val+' · boxes '+ex.boxes+' · '+ex.dataset_yaml;
+    }
+  }catch(e){$('#mm2DatasetMessage').textContent=e.message}
+}
+$('#mm2DatasetCapture').onclick=async()=>{
+  await mm2DatasetAction('capture',{note:$('#mm2DatasetNote').value.trim()||null});
+  setTimeout(async()=>{await mm2DatasetAction('list');setTimeout(loadMM2DatasetControls,350)},350);
+};
+$('#mm2DatasetList').onclick=async()=>{await mm2DatasetAction('list');setTimeout(loadMM2DatasetControls,350)};
+$('#mm2DatasetExport').onclick=async()=>{await mm2DatasetAction('export',{validation_ratio:0.2});setTimeout(loadMM2DatasetControls,500)};
+$('#mm2ApproveAll').onclick=async()=>{
+  if(!mm2CurrentDatasetSample){$('#mm2DatasetMessage').textContent='Pilih sample dulu.';return}
+  await mm2DatasetAction('approve',{sample_id:mm2CurrentDatasetSample});
+  setTimeout(async()=>{await mm2DatasetAction('preview',{sample_id:mm2CurrentDatasetSample});setTimeout(loadMM2DatasetControls,350)},350);
+};
+$('#mm2RejectAll').onclick=async()=>{
+  if(!mm2CurrentDatasetSample){$('#mm2DatasetMessage').textContent='Pilih sample dulu.';return}
+  await mm2DatasetAction('reject',{sample_id:mm2CurrentDatasetSample});
+  setTimeout(async()=>{await mm2DatasetAction('preview',{sample_id:mm2CurrentDatasetSample});setTimeout(loadMM2DatasetControls,350)},350);
+};
+
+health();setInterval(()=>{const active=document.querySelector('.tab.active')?.dataset.tab;if(active==='learn')loadJobs();if(active==='agent')loadActivePlan();if(active==='skills'){loadBodies();loadSkillTests()}if(active==='perception'){loadPerceptionNodes();loadPerceptionProbes()}if(active==='navigation'){loadNavigationNodes();loadNavigationProbes()}if(active==='mm2'){loadMM2();loadMM2DatasetControls()}},2000);
 </script>
 </body>
 </html>
