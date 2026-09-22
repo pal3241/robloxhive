@@ -13,6 +13,7 @@ class SkillInput(Protocol):
     def move(self, direction: str, seconds: float) -> None: ...
     def interact(self, key: str = "interact") -> None: ...
     def click_client(self, x: int, y: int, button: str = "left") -> None: ...
+    def look_delta(self, dx: int, dy: int = 0) -> None: ...
     def release_all(self) -> None: ...
 
 
@@ -295,14 +296,32 @@ class GenericVisualSkills:
                 lost += 1
                 if lost > cfg.lost_target_limit:
                     self.input.release_all()
+                    diagnostics = {}
+                    try:
+                        diagnostics = self.perception.diagnostics()
+                    except Exception:
+                        diagnostics = {}
                     return ActionResult(
                         action="follow_player",
                         status=ActionStatus.FAILED,
                         error="PLAYER_LOST",
                         recoverable=True,
-                        details={"target": target, "iterations": index + 1},
+                        details={
+                            "target": target,
+                            "iterations": index + 1,
+                            "perception": diagnostics,
+                            "reason": "Exact username/nameplate was not visible or could not be verified.",
+                        },
                     )
-                self.input.move("right", cfg.steering_seconds)
+                # Reacquire by rotating the camera. Strafing does not expose
+                # players that are behind/outside the current view.
+                look = getattr(self.input, "look_delta", None)
+                if callable(look):
+                    direction = 1 if ((index // 2) % 2 == 0) else -1
+                    look(95 * direction, 0)
+                else:
+                    self.input.move("right", cfg.steering_seconds)
+                time.sleep(cfg.settle_seconds)
                 continue
 
             lost = 0
