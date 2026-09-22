@@ -122,6 +122,22 @@ class Win32MessageInput:
             self._post(win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lparam)
             self._post(win32con.WM_RBUTTONUP, 0, lparam)
 
+    def look_delta(self, dx: int, dy: int = 0) -> None:
+        try:
+            import win32api
+            import win32con
+            import win32gui
+        except ImportError as exc:
+            raise RuntimeError("Win32MessageInput requires pywin32") from exc
+        left, top, right, bottom = win32gui.GetClientRect(self.hwnd)
+        cx = max(1, (right - left) // 2)
+        cy = max(1, (bottom - top) // 2)
+        start = win32api.MAKELONG(cx, cy)
+        end = win32api.MAKELONG(max(0, cx + int(dx)), max(0, cy + int(dy)))
+        self._post(win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, start)
+        self._post(win32con.WM_MOUSEMOVE, win32con.MK_RBUTTON, end)
+        self._post(win32con.WM_RBUTTONUP, 0, end)
+
     def release_all(self) -> None:
         try:
             import win32con
@@ -296,6 +312,26 @@ class ForegroundWin32Input:
             with self._focused():
                 pydirectinput.moveTo(sx, sy, duration=0)
                 pydirectinput.click(button="left" if button == "left" else "right")
+        finally:
+            try:
+                pydirectinput.moveTo(previous_cursor[0], previous_cursor[1], duration=0)
+            except Exception:
+                pass
+
+    def look_delta(self, dx: int, dy: int = 0) -> None:
+        try:
+            import pydirectinput
+            import win32api
+        except ImportError as exc:
+            raise RuntimeError("Foreground input requires pydirectinput and pywin32") from exc
+        previous_cursor = win32api.GetCursorPos()
+        try:
+            with self._focused():
+                pydirectinput.mouseDown(button="right")
+                try:
+                    pydirectinput.moveRel(int(dx), int(dy), duration=0.08)
+                finally:
+                    pydirectinput.mouseUp(button="right")
         finally:
             try:
                 pydirectinput.moveTo(previous_cursor[0], previous_cursor[1], duration=0)
