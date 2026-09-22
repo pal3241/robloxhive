@@ -17,7 +17,10 @@ class FakeExecutor:
         self.calls = []
 
     def available(self):
-        return ["observe", "explore"]
+        return ["observe", "explore", "follow_player"]
+
+    def describe(self):
+        return {"skills": self.available(), "metadata": {"ocr_available": True}}
 
     def execute(self, skill, payload):
         self.calls.append((skill, payload))
@@ -67,6 +70,20 @@ class FakeActor:
         )
 
 
+class ExplodingActor:
+    class Config:
+        vision = False
+        base_url = "fake"
+        model = "fake"
+
+    config = Config()
+    last_latency_ms = 0
+    last_error = None
+
+    def decide(self, **_kwargs):
+        raise AssertionError("Ollama must not be called for explicit follow_player goals")
+
+
 class RebuildV1Tests(unittest.TestCase):
     def test_cognitive_memory_retrieval_prefers_relevant_fact(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -93,6 +110,28 @@ class RebuildV1Tests(unittest.TestCase):
         fence = chr(96) * 3
         row = OllamaActor._extract_json(fence + "json\n{\"action\":\"observe\"}\n" + fence)
         self.assertEqual(row["action"], "observe")
+
+    def test_follow_goal_bypasses_ollama_and_executes_exact_username(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = FakeExecutor()
+            runtime = SingleBotRuntime(
+                executor,
+                game_id=12,
+                memory_path=str(Path(tmp) / "memory.db"),
+            )
+            runtime.actor = ExplodingActor()
+            runtime.set_goal(
+                "Follow the requested user",
+                goal_type="follow_player",
+                target="Alice_123",
+            )
+            runtime.set_enabled(True)
+            runtime.tick()
+
+            self.assertEqual(executor.calls[0][0], "follow_player")
+            self.assertEqual(executor.calls[0][1]["target"], "Alice_123")
+            self.assertEqual(executor.calls[0][1]["username"], "Alice_123")
+            self.assertTrue(runtime.last_decision["deterministic"])
 
     def test_single_runtime_executes_actor_action_and_persists_interpretation(self):
         with tempfile.TemporaryDirectory() as tmp:
