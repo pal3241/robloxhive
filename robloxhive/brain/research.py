@@ -101,7 +101,7 @@ class InternetResearcher:
         except ImportError as exc:
             raise RuntimeError(
                 "Internet research requires the 'ddgs' package. "
-                "Install RobloxHive with: pip install -e ".[research]"."
+                'Install RobloxHive with: pip install -e ".[research]".'
             ) from exc
 
         queries = self.build_queries(game_name, objective)
