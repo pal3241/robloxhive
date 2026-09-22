@@ -540,6 +540,65 @@ class SingleBotRuntime:
             result = self.executor.execute(action, payload)
         return self._record_result(action, payload, result, reason)
 
+    def _tick_follow_goal(self, world: dict[str, Any]) -> bool:
+        if self.goal.get("type") != "follow_player":
+            return False
+
+        username = str(self.goal.get("target") or "").strip()
+        if not username:
+            self.paused_reason = "follow_username_missing"
+            self.last_decision = {
+                "action": "follow_player",
+                "payload": {},
+                "confidence": 0.0,
+                "reason": "Exact Roblox username is missing.",
+                "deterministic": True,
+            }
+            return True
+
+        payload = {
+            "target": username,
+            "username": username,
+            # Keep each control slice bounded so dashboard/status remains responsive.
+            "iterations": 18,
+        }
+        self.last_decision = {
+            "action": "follow_player",
+            "payload": payload,
+            "confidence": 1.0,
+            "reason": "Explicit follow goal bypasses Ollama and directly tracks the requested username.",
+            "done": False,
+            "deterministic": True,
+            "working_memory": dict(self.working_memory),
+        }
+        self.decision_count += 1
+        event = self._execute(
+            "follow_player",
+            payload,
+            "Direct follow controller for exact user-provided Roblox username.",
+        )
+
+        result = event.get("result") or {}
+        error = result.get("error")
+        details = result.get("details") or {}
+        if event.get("success"):
+            self.paused_reason = None
+            self.working_memory.update(
+                subgoal=f"Maintain follow distance to {username}",
+                hypothesis="Requested username is currently verified/trackable.",
+                blocked_by="",
+                next_check="Keep reacquiring the same username if visibility changes.",
+            )
+        else:
+            self.paused_reason = "follow_reacquiring"
+            self.working_memory.update(
+                subgoal=f"Reacquire {username}",
+                hypothesis="Target may be outside the current camera view or OCR cannot read the nameplate.",
+                blocked_by=str(error or "target_not_verified"),
+                next_check=str(details.get("reason") or "Rotate camera and retry exact username detection."),
+            )
+        return True
+
     def tick(self) -> None:
         if not self.enabled or self.goal.get("type") == "idle":
             return
@@ -550,6 +609,12 @@ class SingleBotRuntime:
         world = snapshot.compact()
         self.last_world = world
         self._update_scene_map(world)
+
+        # Explicit follow is a realtime control contract, not an open-ended
+        # reasoning problem. Execute it directly and use Ollama only for other
+        # custom scenarios.
+        if self._tick_follow_goal(world):
+            return
 
         query = self._memory_query(world)
         memories = self.memory.retrieve(query, game_id=self.game_id, limit=18)
