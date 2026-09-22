@@ -734,6 +734,7 @@ class SingleBotRuntime:
                 "game_id": self.game_id,
                 "goal": dict(self.goal),
                 "skills": self.executor.available(),
+                "executor": self.executor.describe(),
                 "last_decision": self.last_decision,
                 "last_result": self.last_result,
                 "last_world": self.last_world,
