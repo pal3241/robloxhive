@@ -45,18 +45,9 @@ def _run_single(args: argparse.Namespace) -> None:
     if os.name != "nt":
         raise SystemExit("RobloxHive single-bot mode is Windows-only.")
 
-    try:
-        import uvicorn
-    except ImportError as exc:
-        raise SystemExit(
-            'Single mode dependencies are missing. Install with: pip install -e ".[windows,brain]"'
-        ) from exc
-
+    # Keep window discovery independent from Dashboard/AI/Learning imports.
+    # This command must still work when an optional subsystem is unavailable.
     from robloxhive.body.discovery import discover_roblox_windows
-    from robloxhive.body.factory import create_generic_skill_executor
-    from robloxhive.body.game_context import detect_process_game_context
-    from robloxhive.interface.single_dashboard import create_single_app
-    from robloxhive.single.runtime import SingleBotRuntime
 
     windows = discover_roblox_windows()
     if args.list_windows:
@@ -66,6 +57,18 @@ def _run_single(args: argparse.Namespace) -> None:
         for item in windows:
             print(f"PID={item.pid} HWND={item.hwnd} TITLE={item.title!r}")
         return
+
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise SystemExit(
+            'Single mode dependencies are missing. Install with: pip install -e ".[single]"'
+        ) from exc
+
+    from robloxhive.body.factory import create_generic_skill_executor
+    from robloxhive.body.game_context import detect_process_game_context
+    from robloxhive.interface.single_dashboard import create_single_app
+    from robloxhive.single.runtime import SingleBotRuntime
 
     if args.pid is not None:
         matches = [item for item in windows if item.pid == args.pid]
