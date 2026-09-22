@@ -233,7 +233,7 @@ function renderStatus(s){
   $("#lastDecision").textContent=JSON.stringify(s.last_decision||{status:s.paused_reason||"waiting"},null,2);
   $("#agentState").textContent=JSON.stringify({enabled:s.enabled,paused_reason:s.paused_reason,stats:s.stats,last_result:s.last_result},null,2);
   $("#agentWorld").textContent=JSON.stringify(s.last_world||{},null,2);
-  $("#gameDiagnostics").textContent=JSON.stringify({game_id:s.game_id,skills:s.skills,last_world_game:s.last_world?.game,navigation:s.last_world?.navigation},null,2);
+  $("#gameDiagnostics").textContent=JSON.stringify({game_id:s.game_id,skills:s.skills,executor:s.executor,last_world_game:s.last_world?.game,navigation:s.last_world?.navigation},null,2);
   $("#recentActions").innerHTML="";
   (s.recent_actions||[]).slice().reverse().forEach(a=>{const d=document.createElement("div");d.textContent=(a.success?"✓ ":"✕ ")+a.action+" — "+(a.reason||"");$("#recentActions").appendChild(d)});
   const o=s.ollama||{};
