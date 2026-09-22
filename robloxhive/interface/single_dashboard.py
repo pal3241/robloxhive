@@ -18,7 +18,7 @@ from robloxhive.single.runtime import SingleBotRuntime
 
 class GoalRequest(BaseModel):
     type: str = Field(default="custom", min_length=1, max_length=80)
-    instruction: str = Field(min_length=1, max_length=1200)
+    instruction: str = Field(default="", max_length=1200)
     target: str | None = Field(default=None, max_length=160)
     start: bool = True
 
@@ -125,9 +125,15 @@ def create_single_app(runtime: SingleBotRuntime) -> FastAPI:
 
     @app.post("/api/agent/goal")
     def set_goal(request: GoalRequest) -> dict[str, Any]:
+        instruction = request.instruction.strip()
+        if not instruction:
+            if request.type == "follow_player":
+                instruction = "Follow the exact requested Roblox username and maintain a useful distance."
+            else:
+                instruction = f"Execute the {request.type} goal using the current game state."
         try:
             goal = runtime.set_goal(
-                request.instruction,
+                instruction,
                 goal_type=request.type,
                 target=request.target,
             )
