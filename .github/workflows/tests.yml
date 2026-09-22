@@ -17,7 +17,11 @@ jobs:
         run: python -m pip install -e ".[brain]"
       - name: Compile
         run: python -m compileall -q robloxhive tests
-      - name: Dashboard smoke import
+      - name: Startup module smoke imports
+        run: |
+          python -c "from robloxhive.brain.research import InternetResearcher"
+          python -c "from robloxhive.interface.single_dashboard import create_single_app"
+      - name: Legacy dashboard smoke import
         run: python -c "from robloxhive.interface.dashboard import create_app; app=create_app(); assert app.title == 'RobloxHive Dashboard'"
       - name: Unit tests
         run: python -m unittest discover -s tests -v
